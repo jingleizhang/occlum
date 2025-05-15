@@ -5,12 +5,13 @@ use std::sync::Once;
 
 use super::*;
 use crate::exception::*;
-use crate::fs::HostStdioFds;
+use crate::fs::{HostStdioFds, ROOT_FS, SEFS_MANAGER};
 use crate::interrupt;
+use crate::io_uring::ENABLE_URING;
 use crate::process::idle_reap_zombie_children;
 use crate::process::{ProcessFilter, SpawnAttr};
 use crate::signal::SigNum;
-use crate::time::up_time::init;
+use crate::time::init;
 use crate::util::host_file_util::{host_file_buffer, parse_host_file, write_host_file, HostFile};
 use crate::util::log::LevelFilter;
 use crate::util::mem_util::from_untrusted::*;
@@ -60,24 +61,17 @@ pub extern "C" fn occlum_ecall_init(
 
     assert!(!instance_dir.is_null());
 
-    let log_level = {
-        let input_log_level = match parse_log_level(log_level) {
-            Err(e) => {
-                eprintln!("invalid log level: {}", e.backtrace());
-                return ecall_errno!(EINVAL);
-            }
-            Ok(log_level) => log_level,
-        };
-        // Use the input log level if and only if the enclave allows debug
-        if sgx_allow_debug() {
-            input_log_level
-        } else {
-            LevelFilter::Off
+    let log_level = match parse_log_level(log_level) {
+        Err(e) => {
+            eprintln!("invalid log level: {}", e.backtrace());
+            return ecall_errno!(EINVAL);
         }
+        Ok(log_level) => log_level,
     };
 
     INIT_ONCE.call_once(|| {
         // Init the log infrastructure first so that log messages will be printed afterwards
+        // The log level may be set to off later if disable_log is true in user configuration
         util::log::init(log_level);
 
         let report = rsgx_self_report();
@@ -94,9 +88,6 @@ pub extern "C" fn occlum_ecall_init(
             }
         }
 
-        // Register exception handlers (support cpuid & rdtsc for now)
-        register_exception_handlers();
-
         unsafe {
             let dir_str: &str = CStr::from_ptr(instance_dir).to_str().unwrap();
             INSTANCE_DIR.push_str(dir_str);
@@ -106,11 +97,19 @@ pub extern "C" fn occlum_ecall_init(
 
         interrupt::init();
 
+        // Init vdso and boot up time stamp here.
+        time::init();
+
+        vm::init_user_space();
+
+        if ENABLE_URING.load(Ordering::Relaxed) {
+            crate::io_uring::MULTITON.poll_completions();
+        }
+
+        // Register exception handlers (support cpuid & rdtsc for now)
+        register_exception_handlers();
+
         HAS_INIT.store(true, Ordering::Release);
-
-        // Init boot up time stamp here.
-        time::up_time::init();
-
         // Enable global backtrace
         unsafe { backtrace::enable_backtrace(&ENCLAVE_PATH, PrintFormat::Short) };
 
@@ -321,10 +320,10 @@ fn do_exec_thread(libos_tid: pid_t, host_tid: pid_t) -> Result<i32> {
     // Idle process should reap all zombie children
     idle_reap_zombie_children()?;
 
-    // sync file system
-    // TODO: only sync when all processes exit
-    use rcore_fs::vfs::FileSystem;
-    crate::fs::ROOT_FS.read().unwrap().sync()?;
+    // We sync all mounted SEFSes before the thread exits
+    // to flush cached data and free memory.
+    let _rootfs = ROOT_FS.read().unwrap();
+    SEFS_MANAGER.update_then_sync_all()?;
 
     // Not to be confused with the return value of a main function.
     // The exact meaning of status is described in wait(2) man page.
@@ -437,12 +436,12 @@ fn parse_host_files(file_buffer: *const host_file_buffer) -> Result<i32> {
     let resolv_conf_ptr = unsafe { (*file_buffer).resolv_conf_buf };
     match parse_host_file(HostFile::ResolvConf, resolv_conf_ptr) {
         Err(e) => {
-            error!("failed to parse /etc/resolv.conf: {}", e.backtrace());
+            warn!("failed to parse /etc/resolv.conf: {}", e.backtrace());
         }
         Ok(resolv_conf_str) => {
             *RESOLV_CONF_STR.write().unwrap() = Some(resolv_conf_str);
             if let Err(e) = write_host_file(HostFile::ResolvConf) {
-                error!("failed to write /etc/resolv.conf: {}", e.backtrace());
+                warn!("failed to write /etc/resolv.conf: {}", e.backtrace());
             }
         }
     }
@@ -450,13 +449,13 @@ fn parse_host_files(file_buffer: *const host_file_buffer) -> Result<i32> {
     let hostname_ptr = unsafe { (*file_buffer).hostname_buf };
     match parse_host_file(HostFile::HostName, hostname_ptr) {
         Err(e) => {
-            error!("failed to parse /etc/hostname: {}", e.backtrace());
+            warn!("failed to parse /etc/hostname: {}", e.backtrace());
         }
         Ok(hostname_str) => {
             misc::init_nodename(&hostname_str);
             *HOSTNAME_STR.write().unwrap() = Some(hostname_str);
             if let Err(e) = write_host_file(HostFile::HostName) {
-                error!("failed to write /etc/hostname: {}", e.backtrace());
+                warn!("failed to write /etc/hostname: {}", e.backtrace());
             }
         }
     }
@@ -464,12 +463,12 @@ fn parse_host_files(file_buffer: *const host_file_buffer) -> Result<i32> {
     let hosts_ptr = unsafe { (*file_buffer).hosts_buf };
     match parse_host_file(HostFile::Hosts, hosts_ptr) {
         Err(e) => {
-            error!("failed to parse /etc/hosts: {}", e.backtrace());
+            warn!("failed to parse /etc/hosts: {}", e.backtrace());
         }
         Ok(hosts_str) => {
             *HOSTS_STR.write().unwrap() = Some(hosts_str);
             if let Err(e) = write_host_file(HostFile::Hosts) {
-                error!("failed to write /etc/hosts: {}", e.backtrace());
+                warn!("failed to write /etc/hosts: {}", e.backtrace());
             }
         }
     }

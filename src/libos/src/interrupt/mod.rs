@@ -38,11 +38,16 @@ pub fn do_handle_interrupt(
 /// Broadcast interrupts to threads by sending POSIX signals.
 pub fn broadcast_interrupts() -> Result<usize> {
     let should_interrupt_thread = |thread: &&ThreadRef| -> bool {
-        // TODO: check Thread::sig_mask to reduce false positives
-        thread.process().is_forced_to_exit()
-            || thread.is_forced_to_stop()
-            || !thread.sig_queues().read().unwrap().empty()
-            || !thread.process().sig_queues().read().unwrap().empty()
+        if thread.process().is_forced_to_exit() || thread.is_forced_to_stop() {
+            return true;
+        }
+
+        let interested = !*thread.sig_mask().read().unwrap();
+        // In the nightly-2022-10-22 Rust compiler, this expression holds two nested read locks.
+        // However, in the stable-2023-12-21 Rust compiler, the expression drops the temporary variables
+        // (including: read lock guard) after each division code completes.
+        !((thread.process().sig_queues().read().unwrap().pending() & interested).empty())
+            || !((thread.sig_queues().read().unwrap().pending() & interested).empty())
     };
 
     let num_signaled_threads = crate::process::table::get_all_threads()

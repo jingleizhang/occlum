@@ -1,12 +1,12 @@
 use super::event_file::EventCreationFlags;
 use super::file_ops;
 use super::file_ops::{
-    get_abs_path_by_fd, get_utimes, AccessibilityCheckFlags, AccessibilityCheckMode, ChownFlags,
-    FcntlCmd, FsPath, LinkFlags, StatFlags, UnlinkFlags, Utime, UtimeFlags, AT_FDCWD, UTIME_OMIT,
+    get_abs_path_by_fd, get_utimes, AccessibilityCheckMode, ChownFlags, FcntlCmd, FsPath,
+    LinkFlags, StatFlags, UnlinkFlags, Utime, UtimeFlags, AT_FDCWD, UTIME_OMIT,
 };
 use super::fs_ops;
 use super::fs_ops::{MountFlags, MountOptions, UmountFlags};
-use super::time::{clockid_t, itimerspec_t, timespec_t, timeval_t, ClockID};
+use super::time::{clockid_t, itimerspec_t, timespec_t, timeval_t, ClockId};
 use super::timer_file::{TimerCreationFlags, TimerSetFlags};
 use super::*;
 use crate::config::{user_rootfs_config, ConfigApp, ConfigMountFsType};
@@ -42,9 +42,9 @@ pub fn do_eventfd2(init_val: u32, flags: i32) -> Result<isize> {
 pub fn do_timerfd_create(clockid: clockid_t, flags: i32) -> Result<isize> {
     debug!("timerfd: clockid {}, flags {} ", clockid, flags);
 
-    let clockid = ClockID::from_raw(clockid)?;
+    let clockid = ClockId::try_from(clockid)?;
     match clockid {
-        ClockID::CLOCK_REALTIME | ClockID::CLOCK_MONOTONIC => {}
+        ClockId::CLOCK_REALTIME | ClockId::CLOCK_MONOTONIC => {}
         _ => {
             return_errno!(EINVAL, "invalid clockid");
         }
@@ -167,8 +167,11 @@ fn do_writev_offset(
         for iov_i in 0..count {
             let iov_ptr = unsafe { iov.offset(iov_i as isize) };
             let iov = unsafe { &*iov_ptr };
-            let buf = unsafe { std::slice::from_raw_parts(iov.base as *const u8, iov.len) };
-            bufs_vec.push(buf);
+            if iov.len != 0 {
+                from_user::check_array(iov.base as *const u8, iov.len)?;
+                let buf = unsafe { std::slice::from_raw_parts(iov.base as *const u8, iov.len) };
+                bufs_vec.push(buf);
+            }
         }
         bufs_vec
     };
@@ -206,8 +209,11 @@ fn do_readv_offset(
         for iov_i in 0..count {
             let iov_ptr = unsafe { iov.offset(iov_i as isize) };
             let iov = unsafe { &*iov_ptr };
-            let buf = unsafe { std::slice::from_raw_parts_mut(iov.base as *mut u8, iov.len) };
-            bufs_vec.push(buf);
+            if iov.len != 0 {
+                from_user::check_mut_array(iov.base as *mut u8, iov.len)?;
+                let buf = unsafe { std::slice::from_raw_parts_mut(iov.base as *mut u8, iov.len) };
+                bufs_vec.push(buf);
+            }
         }
         bufs_vec
     };
@@ -289,6 +295,12 @@ pub fn do_fstatat(dirfd: i32, path: *const i8, stat_buf: *mut Stat, flags: u32) 
         .into_owned();
     let flags = StatFlags::from_bits(flags).ok_or_else(|| errno!(EINVAL, "invalid flags"))?;
     let fs_path = FsPath::new(&path, dirfd, flags.contains(StatFlags::AT_EMPTY_PATH))?;
+
+    // In this case, the behavior of fstatat() is similar to that of fstat().
+    if let Some(fd) = fs_path.as_fd() {
+        return self::do_fstat(fd, stat_buf);
+    }
+
     from_user::check_mut_ptr(stat_buf)?;
     let stat = file_ops::do_fstatat(&fs_path, flags)?;
     unsafe {
@@ -298,17 +310,16 @@ pub fn do_fstatat(dirfd: i32, path: *const i8, stat_buf: *mut Stat, flags: u32) 
 }
 
 pub fn do_access(path: *const i8, mode: u32) -> Result<isize> {
-    self::do_faccessat(AT_FDCWD, path, mode, 0)
+    self::do_faccessat(AT_FDCWD, path, mode)
 }
 
-pub fn do_faccessat(dirfd: i32, path: *const i8, mode: u32, flags: u32) -> Result<isize> {
+pub fn do_faccessat(dirfd: i32, path: *const i8, mode: u32) -> Result<isize> {
     let path = from_user::clone_cstring_safely(path)?
         .to_string_lossy()
         .into_owned();
     let fs_path = FsPath::new(&path, dirfd, false)?;
     let mode = AccessibilityCheckMode::from_u32(mode)?;
-    let flags = AccessibilityCheckFlags::from_u32(flags)?;
-    file_ops::do_faccessat(&fs_path, mode, flags).map(|_| 0)
+    file_ops::do_faccessat(&fs_path, mode).map(|_| 0)
 }
 
 pub fn do_lseek(fd: FileDesc, offset: off_t, whence: i32) -> Result<isize> {
@@ -517,6 +528,7 @@ pub fn do_linkat(
         .to_string_lossy()
         .into_owned();
     let flags = LinkFlags::from_bits(flags).ok_or_else(|| errno!(EINVAL, "invalid flags"))?;
+    // The oldpath must be an inode.
     let old_fs_path = FsPath::new(&oldpath, olddirfd, flags.contains(LinkFlags::AT_EMPTY_PATH))?;
     let new_fs_path = FsPath::new(&newpath, newdirfd, false)?;
     file_ops::do_linkat(&old_fs_path, &new_fs_path, flags)?;
@@ -547,6 +559,9 @@ pub fn do_readlinkat(dirfd: i32, path: *const i8, buf: *mut u8, size: usize) -> 
         .to_string_lossy()
         .into_owned();
     let buf = {
+        if size == 0 {
+            return_errno!(EINVAL, "bufsiz is not a positive number");
+        }
         from_user::check_array(buf, size)?;
         unsafe { std::slice::from_raw_parts_mut(buf, size) }
     };
@@ -591,26 +606,32 @@ pub fn do_fchmodat(dirfd: i32, path: *const i8, mode: u16) -> Result<isize> {
     Ok(0)
 }
 
-pub fn do_chown(path: *const i8, uid: u32, gid: u32) -> Result<isize> {
+pub fn do_chown(path: *const i8, uid: i32, gid: i32) -> Result<isize> {
     self::do_fchownat(AT_FDCWD, path, uid, gid, 0)
 }
 
-pub fn do_fchown(fd: FileDesc, uid: u32, gid: u32) -> Result<isize> {
+pub fn do_fchown(fd: FileDesc, uid: i32, gid: i32) -> Result<isize> {
     file_ops::do_fchown(fd, uid, gid)?;
     Ok(0)
 }
 
-pub fn do_fchownat(dirfd: i32, path: *const i8, uid: u32, gid: u32, flags: i32) -> Result<isize> {
+pub fn do_fchownat(dirfd: i32, path: *const i8, uid: i32, gid: i32, flags: i32) -> Result<isize> {
     let path = from_user::clone_cstring_safely(path)?
         .to_string_lossy()
         .into_owned();
     let flags = ChownFlags::from_bits(flags).ok_or_else(|| errno!(EINVAL, "invalid flags"))?;
     let fs_path = FsPath::new(&path, dirfd, flags.contains(ChownFlags::AT_EMPTY_PATH))?;
+
+    // In this case, the behavior of fchownat() is similar to that of fchown().
+    if let Some(fd) = fs_path.as_fd() {
+        return self::do_fchown(fd, uid, gid);
+    }
+
     file_ops::do_fchownat(&fs_path, uid, gid, flags)?;
     Ok(0)
 }
 
-pub fn do_lchown(path: *const i8, uid: u32, gid: u32) -> Result<isize> {
+pub fn do_lchown(path: *const i8, uid: i32, gid: i32) -> Result<isize> {
     self::do_fchownat(
         AT_FDCWD,
         path,
@@ -652,7 +673,7 @@ pub fn do_ioctl(fd: FileDesc, cmd: u32, argp: *mut u8) -> Result<isize> {
         if argp.is_null() == false {
             from_user::check_mut_ptr(argp)?;
         }
-        IoctlCmd::new(cmd, argp)?
+        IoctlRawCmd::new(cmd, argp)?
     };
     file_ops::do_ioctl(fd, &mut ioctl_cmd)?;
     Ok(0)

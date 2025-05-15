@@ -101,7 +101,6 @@ impl ChunkManager {
         if let VMMapAddr::Force(addr) = addr {
             self.munmap(addr, size)?;
         }
-        trace!("mmap options = {:?}", options);
 
         // Find and allocate a new range for this mmap request
         let new_range = self
@@ -130,7 +129,6 @@ impl ChunkManager {
 
             new_vma.unwrap()
         };
-        trace!("new vma is ready");
 
         self.free_size -= new_vma.size();
         // After initializing, we can safely insert the new VMA
@@ -286,10 +284,16 @@ impl ChunkManager {
                 Some(intersection_vma) => intersection_vma,
             };
 
+            if let Some((file_ref, _)) = intersection_vma.writeback_file() {
+                if !file_ref.access_mode().unwrap().writable() && new_perms.can_write() {
+                    return_errno!(EACCES, "file is not writable");
+                }
+            }
+
             if intersection_vma.range() == containing_vma.range() {
                 // The whole containing_vma is mprotected
                 containing_vma.set_perms(new_perms);
-                containing_vma.modify_permissions_for_committed_pages(containing_vma.perms());
+                containing_vma.modify_permissions_for_committed_pages(old_perms, new_perms);
                 containing_vmas.replace_with(VMAObj::new_vma_obj(containing_vma));
                 containing_vmas.move_next();
                 continue;
@@ -313,7 +317,7 @@ impl ChunkManager {
                             new_perms,
                             VMAccess::Private(current_pid),
                         );
-                        new_vma.modify_permissions_for_committed_pages(new_vma.perms());
+                        new_vma.modify_permissions_for_committed_pages(old_perms, new_perms);
                         let new_vma = VMAObj::new_vma_obj(new_vma);
 
                         // Another new VMA
@@ -347,7 +351,7 @@ impl ChunkManager {
                             VMAccess::Private(current_pid),
                         );
 
-                        new_vma.modify_permissions_for_committed_pages(new_vma.perms());
+                        new_vma.modify_permissions_for_committed_pages(old_perms, new_perms);
 
                         if remain_vma.start() == containing_vma.start() {
                             // mprotect right side of the vma
@@ -501,7 +505,7 @@ impl VMRemapParser for ChunkManager {
 
 impl Drop for ChunkManager {
     fn drop(&mut self) {
-        info!("drop chunk manager = {:?}", self);
+        debug!("drop chunk manager = {:?}", self);
         assert!(self.is_empty());
         assert!(self.free_size == self.range.size());
         assert!(self.free_manager.free_size() == self.range.size());

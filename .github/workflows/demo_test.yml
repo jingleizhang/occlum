@@ -13,7 +13,11 @@ concurrency:
 
 jobs:
   C_cpp_rust_golang_embedded_mode_support_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -82,8 +86,7 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/tools/toolchains/golang && ./build.sh go1.18.4_for_occlum && cd /root/occlum/demos/golang/go_sqlite/ && SGX_MODE=SIM ./run_go_sqlite_demo.sh"
 
     - name: Go Server set up and run
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/golang/web_server && occlum-go mod init web_server && occlum-go get -u -v github.com/gin-gonic/gin;
-            occlum-go build -o web_server ./web_server.go;
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/golang/web_server && ./build.sh;
             SGX_MODE=SIM ./run_golang_on_occlum.sh" &
 
     - name: Set up Golang grpc pingpong test
@@ -97,6 +100,11 @@ jobs:
         sleep ${{ env.nap_time }};
         docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/golang/grpc_pingpong && SGX_MODE=SIM ./run_ping_on_occlum.sh"
 
+    - name: Run Golang exec test
+      run: |
+        sleep ${{ env.nap_time }};
+        docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/golang/go_exec && SGX_MODE=SIM ./run_sub_exec_on_occlum.sh"
+
     # This is for the go web_server test
     - name: Curl test
       run: |
@@ -107,7 +115,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./golang/grpc_pingpong && rm -rf ./golang/web_server"
 
   Java_support_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -141,7 +153,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./java"
 
   Fish_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -172,7 +188,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./fish"
 
   Bazel_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -208,7 +228,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./hello_bazel"
 
   Https_server_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -241,7 +265,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./https_server"
 
   Local_attestation_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -270,7 +298,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./local_attestation"
 
   Sqlite_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -298,7 +330,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./sqlite"
 
   Xgboost_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -329,7 +365,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./xgboost"
 
   Tensorflow_lite_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -360,7 +400,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./tensorflow_lite"
 
   Pytorch_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -388,7 +432,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./pytorch/standalone"
 
   Distributed_Pytorch_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -426,7 +474,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./pytorch/distributed"
 
   Tensorflow_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -453,50 +505,12 @@ jobs:
     - name: Clean Tensorflow test
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./tensorflow/tensorflow_training"
 
-# Below tests needs test image to run faster
-  Grpc_musl_test:
-    runs-on: ubuntu-20.04
-    steps:
-    - name: Remove unnecessary files
-      run: |
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-    
-    - uses: actions/checkout@v1
-      with:
-        submodules: true
-
-    - name: Create container
-      run: docker run -itd --name=${{ github.job }} -v $GITHUB_WORKSPACE:/root/occlum occlumbackup/occlum:latest-ubuntu20.04-grpc
-
-    - uses: ./.github/workflows/composite_action/prebuild
-      with:
-        container-name: ${{ github.job }}
-
-    - name: Build dependencies
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum; make submodule"
-
-    - name: Make install
-      run: docker exec ${{ github.job }} bash -c "source /opt/intel/sgxsdk/environment; cd /root/occlum; OCCLUM_RELEASE_BUILD=y make install"
-
-    - name: Prepare grpc sample project
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_musl && ./prepare_client_server.sh"
-
-    - name: Run grpc server
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_musl && SGX_MODE=SIM ./run_server_on_occlum.sh" &
-
-    - name: Run grpc client
-      run: |
-        sleep ${{ env.nap_time }};
-        docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_musl && SGX_MODE=SIM ./run_client_on_occlum.sh"
-
-    - name: Clean Grpc test
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos && rm -rf ./grpc/grpc_musl"
-
   Grpc_glibc_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -509,39 +523,38 @@ jobs:
       with:
         submodules: true
 
-    - name: Create container
-      run: docker run -itd --name=${{ github.job }} -v $GITHUB_WORKSPACE:/root/occlum occlumbackup/occlum:latest-ubuntu20.04-grpc
-
-    - uses: ./.github/workflows/composite_action/prebuild
+    - uses: ./.github/workflows/composite_action/sim
       with:
         container-name: ${{ github.job }}
+        build-envs: 'OCCLUM_RELEASE_BUILD=1'
 
-    - name: Build dependencies
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum; make submodule"
-
-    - name: Make install
-      run: docker exec ${{ github.job }} bash -c "source /opt/intel/sgxsdk/environment; cd /root/occlum; OCCLUM_RELEASE_BUILD=y make install"
-
-    - name: Prepare grpc sample project
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_glibc && ./prepare_client_server_glibc.sh"
+    - name: Build grpc and sample project
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/grpc/grpc_glibc && ./dl_and_build.sh"
 
     - name: Run grpc server
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_glibc && SGX_MODE=SIM ./run_server_on_occlum_glibc.sh" &
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/grpc/grpc_glibc && SGX_MODE=SIM ./run_server_on_occlum_glibc.sh" &
 
     - name: Run grpc client
       run: |
         sleep ${{ env.nap_time }};
-        docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_glibc && SGX_MODE=SIM ./run_client_on_occlum_glibc.sh"
+        docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/grpc/grpc_glibc && SGX_MODE=SIM ./run_client_on_occlum_glibc.sh"
+
+    - name: Prepare stress test
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/grpc/grpc_glibc && ./prepare_stress_test_tool.sh"
 
     - name: Run grpc stress client
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/grpc/grpc_glibc && ./run_stress_test.sh"
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/grpc/grpc_glibc && ./run_stress_test.sh"
     
     - name: Clean Grpc test
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos && rm -rf ./grpc/grpc_glibc"
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./grpc/grpc_glibc"
 
 
   Grpc_tls_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -580,79 +593,13 @@ jobs:
     - name: Clean Grpc tls test
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./grpc/grpc_tls"
 
-
-  Openvino_test:
-    runs-on: ubuntu-20.04
-    steps:
-    - name: Remove unnecessary files
-      run: |
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-
-    - uses: actions/checkout@v1
-      with:
-        submodules: true
-
-    - name: Create container
-      run: docker run -itd --name=${{ github.job }} -v $GITHUB_WORKSPACE:/root/occlum occlumbackup/occlum:latest-ubuntu20.04-openvino
-
-    - uses: ./.github/workflows/composite_action/prebuild
-      with:
-        container-name: ${{ github.job }}
-
-    - name: Build dependencies
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum; make submodule"
-
-    - name: Make install
-      run: docker exec ${{ github.job }} bash -c "source /opt/intel/sgxsdk/environment; cd /root/occlum; OCCLUM_RELEASE_BUILD=y make install"
-
-    - name: Run Openvino benchmark
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/openvino && cp -rf /root/occlum/demos/openvino/* . && SGX_MODE=SIM ./run_benchmark_on_occlum.sh"
-    
-    - name: Clean Openvino test
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos && rm -rf ./grpc/openvino"
-
-  # Python test also needs its own image because in Alpine environment, modules are built locally and consumes a lot of time.
-  Python_musl_support_test:
-    runs-on: ubuntu-20.04
-    steps:
-    - name: Remove unnecessary files
-      run: |
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-    
-    - uses: actions/checkout@v1
-      with:
-        submodules: true
-    - name: Create container
-      run: docker run -itd --name=${{ github.job }} -v $GITHUB_WORKSPACE:/root/occlum occlumbackup/occlum:latest-ubuntu20.04-python
-
-    - uses: ./.github/workflows/composite_action/prebuild
-      with:
-        container-name: ${{ github.job }}
-
-    - name: Build dependencies
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum; make submodule"
-
-    - name: Make install
-      run: docker exec ${{ github.job }} bash -c "source /opt/intel/sgxsdk/environment; cd /root/occlum; OCCLUM_RELEASE_BUILD=1 make install"
-
-    - name: Run python support test
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/python/python_musl; SGX_MODE=SIM ./run_python_on_occlum.sh"
-
-    - name: Check result
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos/python/python_musl/occlum_instance; cat smvlight.dat"
-    
-    - name: Clean Python musl test
-      run: docker exec ${{ github.job }} bash -c "cd /root/demos && rm -rf ./python/python_musl"
-
   # Python glibc support test
   Python_glibc_support_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -688,7 +635,11 @@ jobs:
 
   # Redis test
   Redis_support_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -727,7 +678,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./redis"
 
   Flink_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -748,16 +703,24 @@ jobs:
     - name: Preinstall dependencies and download flink
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && ./preinstall_deps.sh && ./download_flink.sh"
 
-    - name: Run jobmanager on host
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && SGX_MODE=SIM ./run_flink_jobmanager_on_host.sh"
+    - name: Build Occlum instance
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && SGX_MODE=SIM ./build_occlum_instance.sh"
 
-    - name: Run flink taskmanager
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && SGX_MODE=SIM ./run_flink_on_occlum_glibc.sh tm > flink.log 2>&1 &"
+    - name: Run flink job manager on Occlum
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && ./run_flink_on_occlum.sh jm"
 
+    - name: Run flink task manager on Occlum
+      run: |
+        sleep ${{ env.nap_time }};
+        docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && ./run_flink_on_occlum.sh tm > flink.log 2>&1 &"
     - name: Run flink task
       run: |
         sleep ${{ env.nap_time }};
-        docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && SGX_MODE=SIM ./run_flink_on_occlum_glibc.sh task"
+        docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink && ./run_flink_on_occlum.sh task"
+
+    - name: Check flink job manager's log
+      if: ${{ always() }}
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/flink; cat occlum_instance_jobmanager/flink--standalonesession-0.log"
 
     - name: Check flink task manager's log
       if: ${{ always() }}
@@ -771,7 +734,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./flink"
 
   Cluster_serving_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -799,7 +766,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./cluster_serving"
 
   Enclave_RA_TLS_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -833,7 +804,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./enclave_tls"
 
   Vault_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -870,7 +845,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./golang/vault"
 
   Sofaboot_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -910,7 +889,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./sofaboot"
 
   Netty_UT_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -935,13 +918,26 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/netty_ut && ./build.sh"
 
     - name: Run netty unit test demo
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/netty_ut && SGX_MODE=SIM ./run_netty_ut_jdk11.sh"
-    
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/netty_ut && SGX_MODE=SIM ./run_netty_ut_jdk8.sh"
+
+    - name: Check netty unit demo results
+      run: |
+        if [[ "${{ matrix.features }}" == "IO_Uring" ]]; then
+          docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/netty_ut/occlum_netty_ut_instance && cat netty-test-heap512m.log | grep '189 tests successful'";
+        else
+          docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/netty_ut/occlum_netty_ut_instance && cat netty-test-heap512m.log | grep '190 tests successful'";
+        fi
+      shell: bash
+
     - name: Clean Netty test
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./netty_ut"
 
   Bash_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -969,7 +965,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./bash"
 
   Sysbench_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1001,7 +1001,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./benchmarks/sysbench"
 
   Gvisor_syscalls_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1014,30 +1018,30 @@ jobs:
       with:
         submodules: true
 
-    - name: Create container
-      run: |
-        docker pull occlumbackup/occlum:latest-ubuntu20.04-gvisor_test
-        gvisor_test=$(docker run -itd -v $GITHUB_WORKSPACE:/root/occlum occlumbackup/occlum:latest-ubuntu20.04-gvisor_test);
-        echo "gvisor_test=$gvisor_test" >> $GITHUB_ENV
-
-    - uses: ./.github/workflows/composite_action/prebuild
+    - uses: ./.github/workflows/composite_action/sim
       with:
-        container-name: $gvisor_test
+        container-name: ${{ github.job }}
+        build-envs: 'OCCLUM_RELEASE_BUILD=1'
 
-    - name: Build dependencies
-      run: docker exec $gvisor_test bash -c "cd /root/occlum; make submodule"
-
-    - name: Make install in debug mode
-      run: docker exec $gvisor_test bash -c "source /opt/intel/sgxsdk/environment; cd /root/occlum; make install"
-
-    - name: Clone gvisor code
-      run: docker exec $gvisor_test bash -c "git clone https://github.com/occlum/gvisor.git"
+    - name: Build gvisor
+      run: docker exec ${{ github.job }} bash -c "git clone -b occlum-release-20200921.0 https://github.com/occlum/gvisor.git;
+            cd gvisor/occlum && ./prepare_bazel.sh && ./build_and_install_syscall_tests.sh"
 
     - name: Run gvisor syscall test
-      run: docker exec $gvisor_test bash -c "cd /root/gvisor/occlum && SGX_MODE=SIM ./run_occlum_passed_tests.sh"
+      run: |
+        if [[ "${{ matrix.features }}" == "IO_Uring" ]]; then
+          docker exec ${{ github.job }} bash -c "cd gvisor/occlum && SGX_MODE=SIM ./run_occlum_passed_tests.sh uring";
+        else
+          docker exec ${{ github.job }} bash -c "cd gvisor/occlum && SGX_MODE=SIM ./run_occlum_passed_tests.sh";
+        fi;
+      shell: bash
 
   Flask_tls_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1079,7 +1083,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./python/flask"
 
   Iperf2_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1114,7 +1122,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./benchmarks/iperf2"
 
   Linux_LTP_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1139,14 +1151,18 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/linux-ltp && SGX_MODE=SIM ./prepare_ltp.sh"
 
     - name: Run the LTP demo
-      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/linux-ltp/ltp_instance;
+      run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/linux-ltp/occlum_instance;
             occlum run /opt/ltp/run-ltp.sh -f syscalls-occlum"
     
     - name: Clean LTP test
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./linux-ltp"
 
   FIO_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1174,7 +1190,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./benchmarks/fio"
 
   PaddlePaddle_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1202,7 +1222,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./paddlepaddle"
 
   RuntimeBoot_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1230,7 +1254,11 @@ jobs:
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./runtime_boot"
 
   Swtpm_test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        features: [Legacy, IO_Uring]
+        os_ver: [ubuntu20.04, ubuntu22.04]
     steps:
     - name: Remove unnecessary files
       run: |
@@ -1258,6 +1286,6 @@ jobs:
       run: |
         sleep ${{ env.nap_time }};
         docker exec ${{ github.job }} bash -c "cd /root/occlum/demos/swtpm; ./run_client.sh"
-    
+
     - name: Clean Swtpm test
       run: docker exec ${{ github.job }} bash -c "cd /root/occlum/demos && rm -rf ./swtpm"

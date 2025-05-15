@@ -1,5 +1,6 @@
 use config::{parse_key, parse_mac, ConfigMount, ConfigMountFsType, ConfigMountOptions};
 use rcore_fs_mountfs::MNode;
+use rootfs::SEFS_MANAGER;
 use std::path::PathBuf;
 use std::sync::Once;
 use util::host_file_util::{write_host_file, HostFile};
@@ -23,14 +24,17 @@ pub fn do_mount_rootfs(
     }
 
     let mount_config = &user_app_config.mount;
+
+    SEFS_MANAGER.clear();
     let new_rootfs = open_root_fs_according_to(mount_config, user_key)?;
-    mount_nonroot_fs_according_to(&new_rootfs.root_inode(), mount_config, user_key, true)?;
+    let root_inode = new_rootfs.root_inode();
     MOUNT_ONCE.call_once(|| {
         let mut rootfs = ROOT_FS.write().unwrap();
         rootfs.sync().expect("failed to sync old rootfs");
         *rootfs = new_rootfs;
         *ENTRY_POINTS.write().unwrap() = user_app_config.entry_points.to_owned();
     });
+    mount_nonroot_fs_according_to(&root_inode, mount_config, user_key, true)?;
 
     // Write resolv.conf file into mounted file system
     write_host_file(HostFile::ResolvConf)?;
@@ -137,18 +141,24 @@ pub fn do_mount(
             };
             (vec![mc], None)
         }
+        MountOptions::Ext2 => {
+            let mc = ConfigMount {
+                type_: ConfigMountFsType::TYPE_EXT2,
+                target,
+                source: None,
+                options: Default::default(),
+            };
+            (vec![mc], None)
+        }
     };
 
     let mut rootfs = ROOT_FS.write().unwrap();
-    // Should we sync the fs before mount?
-    rootfs.sync()?;
+    SEFS_MANAGER.sync_all()?;
+    let root_inode = rootfs.root_inode();
+    drop(rootfs);
+
     let follow_symlink = !flags.contains(MountFlags::MS_NOSYMFOLLOW);
-    mount_nonroot_fs_according_to(
-        &rootfs.root_inode(),
-        &mount_configs,
-        &user_key,
-        follow_symlink,
-    )?;
+    mount_nonroot_fs_according_to(&root_inode, &mount_configs, &user_key, follow_symlink)?;
     Ok(())
 }
 
@@ -166,10 +176,12 @@ pub fn do_umount(target: &str, flags: UmountFlags) -> Result<()> {
     };
 
     let mut rootfs = ROOT_FS.write().unwrap();
-    // Should we sync the fs before umount?
-    rootfs.sync()?;
+    // XXX: There may be redundant sync with `MNode::umount()`
+    SEFS_MANAGER.sync_all()?;
+    let root_inode = rootfs.root_inode();
     let follow_symlink = !flags.contains(UmountFlags::UMOUNT_NOFOLLOW);
-    umount_nonroot_fs(&rootfs.root_inode(), &target, follow_symlink)?;
+    umount_nonroot_fs(&root_inode, &target, follow_symlink)?;
+    SEFS_MANAGER.update();
     Ok(())
 }
 
@@ -215,6 +227,7 @@ pub enum MountOptions {
     SEFS(SEFSMountOptions),
     HostFS(PathBuf),
     RamFS,
+    Ext2,
 }
 
 impl MountOptions {
@@ -253,6 +266,7 @@ impl MountOptions {
                 Self::HostFS(dir)
             }
             ConfigMountFsType::TYPE_RAMFS => Self::RamFS,
+            ConfigMountFsType::TYPE_EXT2 => Self::Ext2,
             _ => {
                 return_errno!(EINVAL, "unsupported fs type");
             }

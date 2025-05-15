@@ -42,6 +42,7 @@ submodule: githooks init-submodule
 	@cp deps/sefs/sefs-cli/lib/libsefs-cli_sim.so build/lib
 	@cp deps/sefs/sefs-cli/lib/libsefs-cli.signed.so build/lib
 	@cp deps/sefs/sefs-cli/enclave/Enclave.config.xml build/sefs-cli.Enclave.xml
+	@cd deps/io-uring/ocalls && cargo clean && cargo build --release
 else
 submodule: githooks init-submodule
 	@rm -rf build
@@ -60,6 +61,7 @@ submodule: githooks init-submodule
 	@cp deps/sefs/sefs-cli/lib/libsefs-cli_sim.so build/lib
 	@cp deps/sefs/sefs-cli/lib/libsefs-cli.signed.so build/lib
 	@cp deps/sefs/sefs-cli/enclave/Enclave.config.xml build/sefs-cli.Enclave.xml
+	@cd deps/io-uring/ocalls && cargo clean && cargo build --release
 endif
 
 init-submodule:
@@ -69,6 +71,7 @@ init-submodule:
 	cd deps/serde-json-sgx && git apply ../serde-json-sgx.patch >/dev/null 2>&1 || git apply ../serde-json-sgx.patch -R --check
 	cd deps/ringbuf && git apply ../ringbuf.patch >/dev/null 2>&1 || git apply ../ringbuf.patch -R --check
 	cd deps/resolv-conf && git apply ../resolv-conf.patch >/dev/null 2>&1 || git apply ../resolv-conf.patch -R --check
+	cd deps/mlsdisk && git apply ../mlsdisk.patch >/dev/null 2>&1 || git apply ../mlsdisk.patch -R --check
 
 src:
 	@$(MAKE) --no-print-directory -C src

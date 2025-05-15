@@ -15,12 +15,14 @@ tar -xf ${TARBALL} -C mysql_src --strip-components 1
 # Make modification to
 # 1. Disable `times` syscall
 patch -s -p0 < apply-mysql-to-occlum.patch
+# 2. Fix boost url issue
+patch -s -p0 < boost_url_fix.patch
 
 # Build and install
 pushd mysql_src
 mkdir bld && cd bld
 
-cmake -j$(nproc) .. \
+cmake .. \
     -DCMAKE_CXX_FLAGS="-fpic -pie" -DCMAKE_C_FLAGS="-fpic -pie" \
     -DWITH_ARCHIVE_STORAGE_ENGINE=0 \
     -DWITH_EXAMPLE_STORAGE_ENGINE=0 \
@@ -47,7 +49,8 @@ cmake -j$(nproc) .. \
     -DWITH_NDB_JAVA=0 \
     -DWITH_RAPID=0 \
     -DWITH_ROUTER=0 \
-    -DWITH_UNIT_TESTS=0
+    -DWITH_UNIT_TESTS=0 \
+    -DDOWNLOAD_BOOST=1 -DWITH_BOOST=/tmp/my_boost
 
 make -j4
 make install -j$(nproc)

@@ -1,21 +1,22 @@
 use super::*;
 
-mod address_family;
-mod flags;
 mod host;
-mod iovs;
-mod msg;
-mod shutdown;
-mod socket_address;
-mod socket_type;
+mod sockopt;
 mod unix;
+mod uring;
+mod util;
 
-pub use self::address_family::AddressFamily;
-pub use self::flags::{FileFlags, MsgHdrFlags, RecvFlags, SendFlags};
 pub use self::host::{HostSocket, HostSocketType};
-pub use self::iovs::{Iovs, IovsMut, SliceAsLibcIovec};
-pub use self::msg::{mmsghdr, msghdr, msghdr_mut, CMessages, CmsgData, MsgHdr, MsgHdrMut};
-pub use self::shutdown::HowToShut;
-pub use self::socket_address::SockAddr;
-pub use self::socket_type::SocketType;
-pub use self::unix::{socketpair, unix_socket, AsUnixSocket, UnixAddr};
+pub use self::unix::{socketpair, unix_socket, AsUnixSocket};
+pub use self::util::{
+    mmsghdr, Addr, AnyAddr, CMessages, CSockAddr, CmsgData, Domain, Iovs, IovsMut, Ipv4Addr,
+    Ipv4SocketAddr, Ipv6SocketAddr, MsgFlags, RecvFlags, SendFlags, Shutdown, SliceAsLibcIovec,
+    SockAddr, SocketFlags, SocketProtocol, SocketType, UnixAddr,
+};
+pub use sockopt::{
+    GetAcceptConnCmd, GetDomainCmd, GetErrorCmd, GetOutputAsBytes, GetPeerNameCmd,
+    GetRecvBufSizeCmd, GetRecvTimeoutCmd, GetSendBufSizeCmd, GetSendTimeoutCmd, GetSockOptRawCmd,
+    GetTypeCmd, SetRecvBufSizeCmd, SetRecvTimeoutCmd, SetSendBufSizeCmd, SetSendTimeoutCmd,
+    SetSockOptRawCmd, SockOptName,
+};
+pub use uring::{socket_file::SocketFile, UringSocketType};

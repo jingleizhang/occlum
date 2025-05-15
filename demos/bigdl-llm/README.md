@@ -61,6 +61,33 @@ HF_DATASETS_CACHE=/root/cache \
 
 For both examples, more arguments info could refer to BigDL-LLM [chatglm2](https://github.com/intel-analytics/BigDL/tree/main/python/llm/example/CPU/HF-Transformers-AutoModels/Model/chatglm2).
 
+## LLM Inference Benchmark
+
+Based on the [benchmark](https://github.com/intel-analytics/BigDL/tree/main/python/llm/dev/benchmark) demo from BigDL, a simple [benchmark](./benchmarks/) is provided to measure the performance of LLM inference both in host and in TEE.
+
+Output will be like:
+```
+=========First token cost xx.xxxxs=========
+=========Last token cost average xx.xxxxs (xx tokens in all)=========
+```
+
+The following **model_path** could be the path of chatglm2-6b or Qwen-7B-Chat.
+**OMP_NUM_THREADS** is used to set the number of threads for OpenMP.
+
+### Benchmark in Host
+```bash
+OMP_NUM_THREADS=16 ./python-occlum/bin/python \
+    ./benchmarks/bench.py  --repo-id-or-model-path <model_path>
+```
+
+### Benchmark in TEE
+```bash
+cd occlum_instance
+OMP_NUM_THREADS=16 occlum run /bin/python3 \
+    /benchmarks/bench.py --repo-id-or-model-path <model_path>
+```
+
+By our benchmark result in Intel Ice Lake server, LLM inference performance within a TEE is approximately 30% less compared to on a host environment.
 
 ## Do inference with webui
 
@@ -70,7 +97,7 @@ BigDL-LLM also support FastChat with using BigDL-LLM as a serving backend in the
 
 For this demo, below commands show how to run an inference service in Occlum with webui interface.
 
-In order to load models using BigDL-LLM, the model name should include "bigdl". In our case, first create a soft link **chatglm2-6b-bigdl** to **chatglm2-6b**.
+In order to load models using BigDL-LLM, the model name should include "bigdl". For example, model **vicuna-7b** should be renamed to **bigdl-7b**. A special case is **ChatGLM** models. For these models, you do not need to do any changes after downloading the model and the BigDL-LLM backend will be used automatically. Details please refer to [Models](https://github.com/intel-analytics/BigDL/tree/main/python/llm/src/bigdl/llm/serving#models).
 
 ### Serving with WebGUI
 
@@ -87,7 +114,7 @@ This controller manages the distributed workers.
 ```bash
 cd occlum_instance
 occlum start
-HF_DATASETS_CACHE=/root/cache  occlum exec /bin/python3 -m bigdl.llm.serving.model_worker --model-path /models/chatglm2-6b-bigdl --device cpu --host 0.0.0.0
+HF_DATASETS_CACHE=/root/cache  occlum exec /bin/python3 -m ipex_llm.serving.fastchat.model_worker --model-path /models/chatglm2-6b --device cpu --host 0.0.0.0
 ```
 Wait until the process finishes loading the model and you see "Uvicorn running on ...". The model worker will register itself to the controller.
 

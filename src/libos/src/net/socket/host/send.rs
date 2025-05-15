@@ -2,25 +2,14 @@ use super::*;
 
 impl HostSocket {
     pub fn send(&self, buf: &[u8], flags: SendFlags) -> Result<usize> {
-        self.sendto(buf, flags, &None)
+        self.sendto(buf, flags, None)
     }
 
-    pub fn sendmsg<'a, 'b>(&self, msg: &'b MsgHdr<'a>, flags: SendFlags) -> Result<usize> {
-        let msg_iov = msg.get_iovs();
-
-        self.do_sendmsg(
-            msg_iov.as_slices(),
-            flags,
-            msg.get_name(),
-            msg.get_control(),
-        )
-    }
-
-    pub(super) fn do_sendmsg(
+    pub fn sendmsg(
         &self,
         data: &[&[u8]],
         flags: SendFlags,
-        name: Option<&[u8]>,
+        addr: Option<AnyAddr>,
         control: Option<&[u8]>,
     ) -> Result<usize> {
         let current = current!();
@@ -45,8 +34,14 @@ impl HostSocket {
             bufs
         };
 
-        let retval = self.do_sendmsg_untrusted_data(&u_data, flags, name, control);
-        retval
+        let raw_addr = addr.map(|addr| addr.to_raw());
+
+        self.do_sendmsg_untrusted_data(
+            &u_data,
+            flags,
+            raw_addr.as_ref().map(|addr| addr.as_slice()),
+            control,
+        )
     }
 
     fn do_sendmsg_untrusted_data(

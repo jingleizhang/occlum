@@ -14,6 +14,13 @@ pub struct SigQueues {
 }
 
 impl SigQueues {
+    const ORDERED_STD_SIGS: [SigNum; COUNT_STD_SIGS] = [
+        SIGKILL, SIGTERM, SIGSTOP, SIGCONT, SIGSEGV, SIGILL, SIGHUP, SIGINT, SIGQUIT, SIGTRAP,
+        SIGABRT, SIGBUS, SIGFPE, SIGUSR1, SIGUSR2, SIGPIPE, SIGALRM, SIGSTKFLT, SIGCHLD, SIGTSTP,
+        SIGTTIN, SIGTTOU, SIGURG, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH, SIGIO, SIGPWR,
+        SIGSYS,
+    ];
+
     pub fn new() -> Self {
         let count = 0;
         let std_queues = (0..COUNT_STD_SIGS).map(|_| None).collect();
@@ -81,13 +88,7 @@ impl SigQueues {
         // POSIX leaves unspecified which to deliver first if there are multiple
         // pending standard signals. So we are free to define our own. The
         // principle is to give more urgent signals higher priority (like SIGKILL).
-        const ORDERED_STD_SIGS: [SigNum; COUNT_STD_SIGS] = [
-            SIGKILL, SIGTERM, SIGSTOP, SIGCONT, SIGSEGV, SIGILL, SIGHUP, SIGINT, SIGQUIT, SIGTRAP,
-            SIGABRT, SIGBUS, SIGFPE, SIGUSR1, SIGUSR2, SIGPIPE, SIGALRM, SIGSTKFLT, SIGCHLD,
-            SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH,
-            SIGIO, SIGPWR, SIGSYS,
-        ];
-        for &signum in &ORDERED_STD_SIGS {
+        for &signum in &Self::ORDERED_STD_SIGS {
             if blocked.contains(signum) {
                 continue;
             }

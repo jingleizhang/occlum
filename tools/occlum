@@ -185,9 +185,7 @@ gen_initfs_aecs()
     # add aecs required libs
     cp -t initfs/$occlum_glibc_lib \
         "$occlum_dir"/toolchains/aecs_client/* \
-        $os_lib_path/libssl.so.1.1 \
         $os_lib_path/libz.so.1 \
-        $os_lib_path/libcrypto.so.1.1 \
         $os_lib_path/libdl.so.2 \
         $occlum_glibc_lib/libnss_files.so.2 \
         $occlum_glibc_lib/libnss_dns.so.2 \
@@ -197,6 +195,10 @@ gen_initfs_aecs()
     if [ -f $os_lib_path/libprotobuf.so.32 ]; then
         cp -t initfs/$occlum_glibc_lib $os_lib_path/libprotobuf.so.32
     fi
+
+    # If no libssl.so or libcrypto.so in toolchain then use the ones from os lib
+    [ -f initfs/$occlum_glibc_lib/libssl.so.1.1 ] || cp $os_lib_path/libssl.so.1.1 initfs/$occlum_glibc_lib/
+    [ -f initfs/$occlum_glibc_lib/libcrypto.so.1.1 ] || cp $os_lib_path/libcrypto.so.1.1 initfs/$occlum_glibc_lib/
 
     # add template init_ra_conf
     cp "$occlum_dir"/etc/template/init_aecs.json "$instance_dir"/init_ra_conf.json
@@ -318,6 +320,8 @@ cmd_init() {
     mkdir -p image/dev
     mkdir -p image/proc
     mkdir -p image/etc
+    mkdir -p image/sbin
+    mkdir -p image/ext2
     local occlum_glibc_lib=/opt/occlum/glibc/lib
     local occlum_glibc_etc=/opt/occlum/glibc/etc
     if [ -d "$occlum_glibc_lib" ]; then
@@ -410,7 +414,6 @@ cmd_build() {
             libos_lib=libocclum-libos_hyper.so
         fi
         echo "SGX mode: $SGX_MODE"
-        echo "Enable EDMM: No"
         INSTANCE_IS_FOR_EDMM_PLATFORM="NO"
     else
         echo "SGX mode: HW"
@@ -419,11 +422,9 @@ cmd_build() {
         case "$ENABLE_EDMM" in
             "Y" | "YES" | "Yes" | "yes" | "True" | "true" | "1")
                 INSTANCE_IS_FOR_EDMM_PLATFORM="YES"
-                echo "Enable EDMM: Yes"
             ;;
             *)
                 INSTANCE_IS_FOR_EDMM_PLATFORM="NO"
-                echo "Enable EDMM: No"
             ;;
         esac
     fi
@@ -431,6 +432,8 @@ cmd_build() {
     if [[ -f "$instance_dir/init_ra_conf.json" ]]; then
         cp "$instance_dir/init_ra_conf.json" "$instance_dir/initfs/etc/"
     fi
+
+    prepare_ext2_if_enabled
 
     # If sgx mode is changed, build thoroughly again
     if [[ -n $SGX_MODE && "$SGX_MODE" != "HW" ]]; then
@@ -471,6 +474,39 @@ cmd_build() {
     echo "Built the Occlum image and enclave successfully"
 }
 
+prepare_ext2_if_enabled() {
+    if ! jq -e '.mount[] | select(.type == "ext2")' "$instance_dir/Occlum.json" > /dev/null 2>&1; then
+        return
+    fi
+
+    local mke2fs_path="/usr/sbin/mke2fs"
+    local occlum_glibc_lib="/opt/occlum/glibc/lib"
+    local os_lib_path="/usr/lib/x86_64-linux-gnu" # for ubuntu
+    local os_release=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+        if [ "$os_release" != "\"Ubuntu\"" ]; then
+            os_lib_path="/usr/lib64"  # for openanolis, alios
+        fi
+    if [ -f "$mke2fs_path" ] && [ -d "$os_lib_path" ] && [ -d "$occlum_glibc_lib" ]; then
+        cp -t "$instance_dir/image/sbin/" "$mke2fs_path"
+        mkdir -p "$instance_dir/image/$occlum_glibc_lib"
+        cp -t "$instance_dir/image/$occlum_glibc_lib" \
+            "$os_lib_path/libext2fs.so.2" \
+            "$os_lib_path/libcom_err.so.2" \
+            "$os_lib_path/libblkid.so.1" \
+            "$os_lib_path/libuuid.so.1" \
+            "$os_lib_path/libe2p.so.2"
+
+        cp -t "$instance_dir/image/lib64/" \
+            "$occlum_glibc_lib/ld-linux-x86-64.so.2"
+        ln -sf /lib64/ld-linux-x86-64.so.2 "$instance_dir/image/$occlum_glibc_lib/ld-linux-x86-64.so.2"
+        cp -t "$instance_dir/image/$occlum_glibc_lib" \
+            "$occlum_glibc_lib/libc.so.6" \
+            "$occlum_glibc_lib/libpthread.so.0" \
+            "$occlum_glibc_lib/libm.so.6"
+    else
+        exit_error "Ext2 enabled but mke2fs tool or its libs not found"
+    fi
+}
 
 cmd_run() {
     check_has_built

@@ -9,6 +9,7 @@ use super::vm_area::{VMAccess, VMArea};
 use super::vm_chunk_manager::ChunkManager;
 use super::vm_perms::VMPerms;
 use super::vm_util::*;
+use crate::config::LIBOS_CONFIG;
 use crate::ipc::SYSTEM_V_SHM_MANAGER;
 use crate::process::{ThreadRef, ThreadStatus};
 
@@ -88,11 +89,14 @@ impl VMManager {
     }
 
     pub fn mmap(&self, options: &VMMapOptions) -> Result<usize> {
-        if options.is_shared() {
+        mmap_file_check_permissions(options)?;
+
+        if LIBOS_CONFIG.feature.enable_posix_shm && options.is_shared() {
             let res = self.internal().mmap_shared_chunk(options);
             match res {
                 Ok(addr) => {
-                    trace!(
+                    // Important info if we reach here
+                    debug!(
                         "mmap_shared_chunk success: addr = 0x{:X}, pid = {}",
                         res.as_ref().unwrap(),
                         current!().process().pid()
@@ -126,6 +130,7 @@ impl VMManager {
         }
 
         if size > CHUNK_DEFAULT_SIZE {
+            info!("allocate Single-VMA chunk");
             if let Ok(new_chunk) = self.internal().mmap_chunk(options) {
                 let start = new_chunk.range().start();
                 current!().vm().add_mem_chunk(new_chunk);
@@ -167,6 +172,7 @@ impl VMManager {
 
         // Slow path: Sadly, there is no free chunk, iterate every chunk to find a range
         {
+            info!("iterate every chunk to find a range");
             // Release lock after this block
             let mut result_start = Ok(0);
             let chunks = &self.internal().chunks;
@@ -185,6 +191,7 @@ impl VMManager {
         }
 
         // Can't find a range in default chunks. Maybe there is still free range in the global free list.
+        info!("try find free range from the global free list");
         if let Ok(new_chunk) = self.internal().mmap_chunk(options) {
             let start = new_chunk.range().start();
             current!().vm().add_mem_chunk(new_chunk);
@@ -215,7 +222,7 @@ impl VMManager {
                 // The man page of munmap states that "it is not an error if the indicated
                 // range does not contain any mapped pages". This is not considered as
                 // an error!
-                trace!("the munmap range is not mapped");
+                debug!("the munmap range is not mapped");
                 return Ok(());
             }
             chunk.unwrap().clone()
@@ -497,7 +504,7 @@ impl VMManager {
                 self.parse_mremap_options_for_single_vma_chunk(options, vma)
             }
         }?;
-        trace!("mremap options after parsing = {:?}", remap_result_option);
+        debug!("mremap options after parsing = {:?}", remap_result_option);
 
         let ret_addr = if let Some(mmap_options) = remap_result_option.mmap_options() {
             let mmap_addr = self.mmap(mmap_options);
@@ -628,7 +635,7 @@ impl InternalVMManager {
 
         // Add this range to chunks
         let chunk = Arc::new(Chunk::new_default_chunk(free_range)?);
-        trace!("allocate a default chunk = {:?}", chunk);
+        debug!("allocate a default chunk: {:?}", chunk);
         self.chunks.insert(chunk.clone());
         Ok(chunk)
     }
@@ -667,7 +674,7 @@ impl InternalVMManager {
         munmap_range: Option<&VMRange>,
         flag: MunmapChunkFlag,
     ) -> Result<()> {
-        trace!(
+        debug!(
             "munmap_chunk range = {:?}, munmap_range = {:?}",
             chunk.range(),
             munmap_range
@@ -694,8 +701,8 @@ impl InternalVMManager {
             }
         };
 
-        if chunk.is_shared() {
-            trace!(
+        if LIBOS_CONFIG.feature.enable_posix_shm && chunk.is_shared() {
+            debug!(
                 "munmap_shared_chunk, chunk_range = {:?}, munmap_range = {:?}",
                 chunk.range(),
                 munmap_range,
@@ -771,7 +778,10 @@ impl InternalVMManager {
                         let mut vma = new_chunk.get_vma_for_single_vma_chunk();
                         // Reset memory permissions
                         if !vma.perms().is_default() {
-                            vma.modify_permissions_for_committed_pages(VMPerms::default())
+                            vma.modify_permissions_for_committed_pages(
+                                vma.perms(),
+                                VMPerms::default(),
+                            )
                         }
                         // Reset memory contents
                         unsafe {
@@ -852,14 +862,15 @@ impl InternalVMManager {
         new_chunk
     }
 
+    // The left chunk is an existing chunk, the right chunk is a newly-created chunk
     fn merge_two_single_vma_chunks(&mut self, lhs: &ChunkRef, rhs: &ChunkRef) -> ChunkRef {
         let mut new_vma = {
             let lhs_vma = lhs.get_vma_for_single_vma_chunk();
             let rhs_vma = rhs.get_vma_for_single_vma_chunk();
             debug_assert_eq!(lhs_vma.end(), rhs_vma.start());
 
-            let mut new_vma = rhs_vma.clone();
-            new_vma.set_start(lhs_vma.start());
+            let mut new_vma = lhs_vma.clone();
+            new_vma.set_end(rhs_vma.end());
             new_vma
         };
 
@@ -874,7 +885,7 @@ impl InternalVMManager {
         new_perms: VMPerms,
     ) -> Result<()> {
         debug_assert!(chunk.range().is_superset_of(&protect_range));
-        if chunk.is_shared() {
+        if LIBOS_CONFIG.feature.enable_posix_shm && chunk.is_shared() {
             trace!(
                 "mprotect_shared_chunk, chunk_range: {:?}, mprotect_range = {:?}",
                 chunk.range(),
@@ -905,6 +916,12 @@ impl InternalVMManager {
                 return Ok(());
             }
 
+            if let Some((file_ref, _)) = containing_vma.writeback_file() {
+                if !file_ref.access_mode().unwrap().writable() && new_perms.can_write() {
+                    return_errno!(EACCES, "file is not writable");
+                }
+            }
+
             let current_pid = current!().process().pid();
             let same_start = protect_range.start() == containing_vma.start();
             let same_end = protect_range.end() == containing_vma.end();
@@ -912,7 +929,7 @@ impl InternalVMManager {
                 (true, true) => {
                     // Exact the same vma
                     containing_vma.set_perms(new_perms);
-                    containing_vma.modify_permissions_for_committed_pages(new_perms);
+                    containing_vma.modify_permissions_for_committed_pages(old_perms, new_perms);
                     return Ok(());
                 }
                 (false, false) => {
@@ -928,7 +945,8 @@ impl InternalVMManager {
                         new_perms,
                         VMAccess::Private(current_pid),
                     );
-                    new_vma.modify_permissions_for_committed_pages(new_perms);
+                    new_vma
+                        .modify_permissions_for_committed_pages(containing_vma.perms(), new_perms);
 
                     let remaining_old_vma = {
                         let range = VMRange::new(protect_range.end(), old_end).unwrap();
@@ -952,7 +970,8 @@ impl InternalVMManager {
                         new_perms,
                         VMAccess::Private(current_pid),
                     );
-                    new_vma.modify_permissions_for_committed_pages(new_perms);
+                    new_vma
+                        .modify_permissions_for_committed_pages(containing_vma.perms(), new_perms);
 
                     if same_start {
                         // Protect range is at left side of the containing vma
@@ -1047,7 +1066,7 @@ impl InternalVMManager {
                         return self.force_mmap_across_multiple_chunks(target_range, options);
                     }
 
-                    trace!(
+                    debug!(
                         "mmap with addr in existing default chunk: {:?}",
                         chunk.range()
                     );
@@ -1181,7 +1200,7 @@ impl InternalVMManager {
                 .collect::<Vec<VMMapOptions>>()
         };
 
-        trace!(
+        debug!(
             "force mmap across multiple chunks mmap ranges = {:?}",
             target_contained_ranges
         );
@@ -1211,5 +1230,32 @@ pub enum MunmapChunkFlag {
 impl VMRemapParser for InternalVMManager {
     fn is_free_range(&self, request_range: &VMRange) -> bool {
         self.free_manager.is_free_range(request_range)
+    }
+}
+
+// Based on the mmap man page:
+// A file descriptor refers to a non-regular file.  Or a file
+// mapping was requested, but fd is not open for reading.  Or
+// MAP_SHARED was requested and PROT_WRITE is set, but fd is
+// not open in read/write (O_RDWR) mode.  Or PROT_WRITE is
+// set, but the file is append-only.
+fn mmap_file_check_permissions(mmap_options: &VMMapOptions) -> Result<()> {
+    match mmap_options.initializer() {
+        VMInitializer::FileBacked { file } => {
+            let (file_ref, _) = file.backed_file();
+            if !file_ref.access_mode().unwrap().readable() {
+                return_errno!(EACCES, "mmap file is not readable");
+            }
+
+            let perms = mmap_options.perms();
+            if let Some((file_ref, _)) = file.writeback_file() {
+                if !file_ref.access_mode().unwrap().writable() && perms.can_write() {
+                    return_errno!(EACCES, "mmap file is not writable");
+                }
+            }
+
+            return Ok(());
+        }
+        _ => return Ok(()),
     }
 }

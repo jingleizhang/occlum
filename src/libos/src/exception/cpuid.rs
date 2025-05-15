@@ -18,7 +18,7 @@ struct CpuIdInput {
 
 #[repr(C)]
 #[derive(Eq, PartialEq, Hash, Clone, Copy, Debug)]
-struct CpuIdResult {
+pub struct CpuIdResult {
     eax: u32,
     ebx: u32,
     ecx: u32,
@@ -57,11 +57,17 @@ impl CpuIdCache {
 
     fn generate_cpuid_cache(&mut self, max_basic_leaf: u32, max_extend_leaf: u32) {
         let mut sgx_support: bool = false;
+        let mut pconfig_support: bool = false;
         // Generate basic leaf cpuid cache
         for leaf in CPUID_MIN_BASIC_LEAF..=max_basic_leaf {
             // Intel SGX Capability Enumeration Leaf,
             // Leaf 12H sub-leaf 0 is supported if CPUID.(EAX=07H, ECX=0H):EBX[SGX] = 1.
             if leaf == 0x12 && !sgx_support {
+                continue;
+            }
+            // Intel PCONFIG Enumeration Leaf,
+            // Leaf 1BH is supported if CPUID.(EAX=07H, ECX=0H):EDX[18] = 1.
+            if leaf == 0x1B && !pconfig_support {
                 continue;
             }
             let mut max_subleaf = 0;
@@ -96,13 +102,15 @@ impl CpuIdCache {
                         0xD => 63,
                         // (Sub-leaf == 0) can not decide max_subleaf for these leaf,
                         // later match expression will decide the max_subleaf.
-                        0x4 | 0xB | 0x12 | 0x1F => CPUID_MAX_SUBLEAF,
+                        0x4 | 0xB | 0x12 | 0x1B | 0x1F => CPUID_MAX_SUBLEAF,
                         // Default max_subleaf is 0.
                         _ => 0,
                     };
                     if leaf == 0x7 {
                         // EBX Bit 02: Supports Intel® SGX Extensions if 1.
                         sgx_support = (cpuid_result.ebx & 0x0000_0004) != 0;
+                        // EDX Bit 18: Supports PCONFIG if 1.
+                        pconfig_support = (cpuid_result.edx & 0x40000) != 0;
                     }
                 }
                 // These leafs determine the maximum supported sub-leaf according to
@@ -120,6 +128,9 @@ impl CpuIdCache {
                         // EAX Bit 03 - 00: Sub-leaf Type.
                         //         0000b: Indicates this sub-leaf is invalid.
                         0x12 if subleaf >= 2 && (cpuid_result.eax & 0x0000000F) == 0 => subleaf,
+                        // If a sub-leaf type (EAX) is 0, the sub-leaf is invalid and zero is returned
+                        // in EBX, ECX, and EDX.
+                        0x1B if (cpuid_result.eax == 0) => subleaf,
                         // V2 Extended Topology Enumeration Leaf
                         // CPUID leaf 0x1F is a preferred superset to leaf 0xB.
                         0x1F if (cpuid_result.ecx & 0x0000_FF00) == 0 => subleaf,
@@ -207,6 +218,15 @@ impl CpuId {
         };
         cpuid_result
     }
+
+    pub fn support_sgx2(&self) -> bool {
+        const SGX_CPUID: u32 = 0x12;
+        let cpuid = self.get_cpuid_info(SGX_CPUID, 0);
+
+        // The 0th bit set to 1 in `cpuid.eax` indicates that the SGX feature is enabled.
+        // The 1st bit set to 1 in `cpuid.eax` indicates that the SGX2 feature is enabled.
+        (cpuid.eax & 0b11) == 0b11
+    }
 }
 
 lazy_static! {
@@ -214,8 +234,9 @@ lazy_static! {
 }
 
 fn is_cpuid_leaf_has_subleaves(leaf: u32) -> bool {
-    const CPUID_LEAF_WITH_SUBLEAF: [u32; 11] =
-        [0x4, 0x7, 0xB, 0xD, 0xF, 0x10, 0x12, 0x14, 0x17, 0x18, 0x1F];
+    const CPUID_LEAF_WITH_SUBLEAF: [u32; 12] = [
+        0x4, 0x7, 0xB, 0xD, 0xF, 0x10, 0x12, 0x14, 0x17, 0x18, 0x1B, 0x1F,
+    ];
     CPUID_LEAF_WITH_SUBLEAF.contains(&leaf)
 }
 
@@ -235,15 +256,26 @@ fn get_cpuid_info_via_ocall(cpuid_input: CpuIdInput) -> CpuIdResult {
     cpuid_result
 }
 
+pub fn is_cpu_support_sgx2() -> bool {
+    CPUID.support_sgx2()
+}
+
+pub fn get_cpuid_info(leaf: u32, subleaf: u32) -> CpuIdResult {
+    CPUID.get_cpuid_info(leaf, subleaf)
+}
+
 pub fn setup_cpuid_info() {
     // Make lazy_static to be executed at runtime in order to be initialized
     let max_basic_leaf = CPUID.get_max_basic_leaf();
 }
 
 pub fn handle_cpuid_exception(user_context: &mut CpuContext) -> Result<isize> {
-    debug!("handle CPUID exception");
     let leaf = user_context.rax as u32;
     let subleaf = user_context.rcx as u32;
+    debug!(
+        "handle CPUID exception: leaf = 0x{:x?}, subleaf = 0x{:x?}",
+        leaf, subleaf
+    );
     let cpuid_result = CPUID.get_cpuid_info(leaf, subleaf);
     trace!("cpuid result: {:?}", cpuid_result);
     user_context.rax = cpuid_result.eax as u64;

@@ -1,5 +1,6 @@
 use super::*;
 use crate::std::untrusted::path::PathEx;
+use crate::util::sgx::allow_debug as sgx_allow_debug;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::CString;
@@ -9,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sgxfs::SgxFile;
 
 use crate::util::mem_util::from_user;
+
+use log::{set_max_level, LevelFilter};
 
 lazy_static! {
     pub static ref LIBOS_CONFIG: Config = {
@@ -104,6 +107,7 @@ pub struct Config {
     pub process: ConfigProcess,
     pub env: ConfigEnv,
     pub app: Vec<ConfigApp>,
+    pub feature: ConfigFeature,
 }
 
 #[derive(Debug)]
@@ -140,6 +144,15 @@ pub struct ConfigApp {
     pub mount: Vec<ConfigMount>,
 }
 
+#[derive(Clone, Debug)]
+pub struct ConfigFeature {
+    pub amx: u32,
+    pub pkru: u32,
+    pub io_uring: u32,
+    pub enable_edmm: bool,
+    pub enable_posix_shm: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[allow(non_camel_case_types)]
 pub enum ConfigMountFsType {
@@ -149,6 +162,7 @@ pub enum ConfigMountFsType {
     TYPE_UNIONFS,
     TYPE_DEVFS,
     TYPE_PROCFS,
+    TYPE_EXT2,
 }
 
 impl ConfigMountFsType {
@@ -162,6 +176,7 @@ impl ConfigMountFsType {
             "unionfs" => ConfigMountFsType::TYPE_UNIONFS,
             "devfs" => ConfigMountFsType::TYPE_DEVFS,
             "procfs" => ConfigMountFsType::TYPE_PROCFS,
+            "ext2" => ConfigMountFsType::TYPE_EXT2,
             _ => {
                 return_errno!(EINVAL, "Unsupported file system type");
             }
@@ -176,6 +191,7 @@ pub struct ConfigMountOptions {
     pub layers: Option<Vec<ConfigMount>>,
     pub temporary: bool,
     pub cache_size: Option<u64>,
+    pub disk_size: Option<u64>,
     pub index: u32,
 }
 
@@ -184,7 +200,6 @@ impl Config {
         let resource_limits = ConfigResourceLimits::from_input(&input.resource_limits)?;
         let process = ConfigProcess::from_input(&input.process)?;
         let env = ConfigEnv::from_input(&input.env)?;
-
         let app = {
             let mut app = Vec::new();
             for input_app in &input.app {
@@ -192,12 +207,28 @@ impl Config {
             }
             app
         };
+        let feature = ConfigFeature::from_input(&input.feature)?;
+
+        if input.disable_log {
+            log::set_max_level(LevelFilter::Off);
+        } else if !sgx_allow_debug() {
+            if log::max_level() != LevelFilter::Off {
+                // Release enclave can only set error level log
+                log::set_max_level(LevelFilter::Error);
+            }
+            eprintln!("Warnning: Occlum Log is enabled for release enclave!");
+            eprintln!(
+                "Uses can disable Occlum Log by setting metadata.disable_log=true \
+                in Occlum.json and rebuild Occlum instance.\n"
+            );
+        }
 
         Ok(Config {
             resource_limits,
             process,
             env,
             app,
+            feature,
         })
     }
 
@@ -275,6 +306,18 @@ impl ConfigApp {
     }
 }
 
+impl ConfigFeature {
+    fn from_input(input: &InputConfigFeature) -> Result<ConfigFeature> {
+        Ok(ConfigFeature {
+            amx: input.amx,
+            pkru: input.pkru,
+            io_uring: input.io_uring,
+            enable_edmm: input.enable_edmm,
+            enable_posix_shm: input.enable_posix_shm,
+        })
+    }
+}
+
 impl ConfigMount {
     fn from_input(input: &InputConfigMount) -> Result<ConfigMount> {
         let type_ = ConfigMountFsType::from_input(input.type_.as_str())?;
@@ -323,11 +366,17 @@ impl ConfigMountOptions {
         } else {
             None
         };
+        let disk_size = if input.disk_size.is_some() {
+            Some(parse_memory_size(input.disk_size.as_ref().unwrap())? as _)
+        } else {
+            None
+        };
         Ok(ConfigMountOptions {
             mac,
             layers,
             temporary: input.temporary,
             cache_size,
+            disk_size,
             index: input.index,
         })
     }
@@ -368,7 +417,11 @@ struct InputConfig {
     #[serde(default)]
     pub env: InputConfigEnv,
     #[serde(default)]
+    pub disable_log: bool,
+    #[serde(default)]
     pub app: Vec<InputConfigApp>,
+    #[serde(default)]
+    pub feature: InputConfigFeature,
 }
 
 #[derive(Deserialize, Debug)]
@@ -474,6 +527,8 @@ struct InputConfigMountOptions {
     #[serde(default)]
     pub cache_size: Option<String>,
     #[serde(default)]
+    pub disk_size: Option<String>,
+    #[serde(default)]
     pub index: u32,
 }
 
@@ -486,6 +541,33 @@ struct InputConfigApp {
     pub entry_points: Vec<String>,
     #[serde(default)]
     pub mount: Vec<InputConfigMount>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+struct InputConfigFeature {
+    #[serde(default)]
+    pub amx: u32,
+    #[serde(default)]
+    pub pkru: u32,
+    #[serde(default)]
+    pub io_uring: u32,
+    #[serde(default)]
+    pub enable_edmm: bool,
+    #[serde(default)]
+    pub enable_posix_shm: bool,
+}
+
+impl Default for InputConfigFeature {
+    fn default() -> InputConfigFeature {
+        InputConfigFeature {
+            amx: 0,
+            pkru: 0,
+            io_uring: 0,
+            enable_edmm: false,
+            enable_posix_shm: false,
+        }
+    }
 }
 
 #[repr(C)]
@@ -506,13 +588,6 @@ pub struct user_rootfs_config {
     // An array of pointers to null-terminated strings
     // and must be terminated by a null pointer
     envp: *const *const i8,
-}
-
-impl user_rootfs_config {
-    pub fn from_raw_ptr(ptr: *const user_rootfs_config) -> Result<user_rootfs_config> {
-        let config = unsafe { *ptr };
-        Ok(config)
-    }
 }
 
 fn to_option_pathbuf(path: *const i8) -> Result<Option<PathBuf>> {

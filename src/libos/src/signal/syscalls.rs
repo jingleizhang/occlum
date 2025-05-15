@@ -14,9 +14,15 @@ pub fn do_rt_sigaction(
     signum_c: c_int,
     new_sa_c: *const sigaction_t,
     old_sa_c: *mut sigaction_t,
+    sigset_size: size_t,
 ) -> Result<isize> {
     // C types -> Rust types
     let signum = SigNum::from_u8(signum_c as u8)?;
+
+    if sigset_size != std::mem::size_of::<sigset_t>() {
+        return_errno!(EINVAL, "unexpected sig action size");
+    }
+
     let new_sa = {
         if !new_sa_c.is_null() {
             let new_sa_c = unsafe { &*new_sa_c };
@@ -89,23 +95,25 @@ pub fn do_rt_sigprocmask(
     if sigset_size != std::mem::size_of::<sigset_t>() {
         return_errno!(EINVAL, "unexpected sigset size");
     }
+
+    let mut set_sig = SigSet::default();
     let op_and_set = {
         if !set_ptr.is_null() {
             let op = MaskOp::from_u32(how as u32)?;
-            let set = unsafe { &*set_ptr };
-            Some((op, set))
+            set_sig = SigSet::from_c(unsafe { *set_ptr });
+            Some((op, &set_sig))
         } else {
             None
         }
     };
-    let old_set = {
-        if !oldset_ptr.is_null() {
-            Some(unsafe { &mut *oldset_ptr })
-        } else {
-            None
+
+    let old_set = super::do_sigprocmask::do_rt_sigprocmask(op_and_set)?;
+    if !oldset_ptr.is_null() {
+        unsafe {
+            *oldset_ptr = old_set.to_c();
         }
-    };
-    super::do_sigprocmask::do_rt_sigprocmask(op_and_set, old_set)?;
+    }
+
     Ok(0)
 }
 
@@ -192,5 +200,18 @@ pub fn do_rt_sigtimedwait(
     };
 
     *info = super::do_sigtimedwait::do_sigtimedwait(mask, timeout.as_ref())?;
+    Ok(0)
+}
+
+pub fn do_rt_sigsuspend(mask_ptr: *const sigset_t) -> Result<isize> {
+    let mask = {
+        if mask_ptr.is_null() {
+            return_errno!(EFAULT, "ptr must not be null");
+        }
+        from_user::check_ptr(mask_ptr)?;
+        SigSet::from_c(unsafe { *mask_ptr })
+    };
+
+    super::do_sigsuspend::do_sigsuspend(&mask)?;
     Ok(0)
 }

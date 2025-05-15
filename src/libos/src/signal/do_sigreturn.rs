@@ -103,7 +103,7 @@ pub fn deliver_signal(cpu_context: &mut CpuContext) {
     let thread = current!();
     let process = thread.process();
 
-    if !process.is_forced_to_exit() && !thread.is_forced_to_stop() {
+    if !process.is_forced_to_exit() && !thread.is_forced_to_stop() && !thread.is_stopped() {
         do_deliver_signal(&thread, &process, cpu_context);
     }
 
@@ -125,12 +125,12 @@ fn do_deliver_signal(thread: &ThreadRef, process: &ProcessRef, cpu_context: &mut
             let sig_mask =
                 *thread.sig_mask().read().unwrap() | *thread.sig_tmp_mask().read().unwrap();
 
-            let signal_opt = process
-                .sig_queues()
-                .write()
-                .unwrap()
-                .dequeue(&sig_mask)
-                .or_else(|| thread.sig_queues().write().unwrap().dequeue(&sig_mask));
+            // Don't use `Option` or_else to avoid nested write locks
+            let mut signal_opt = process.sig_queues().write().unwrap().dequeue(&sig_mask);
+            if signal_opt.is_none() {
+                signal_opt = thread.sig_queues().write().unwrap().dequeue(&sig_mask);
+            }
+
             if signal_opt.is_none() {
                 return;
             }

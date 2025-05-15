@@ -33,9 +33,14 @@
         "ext_prod_id": {
             "high": "0x0",
             "low": "0x0"
-        },
+        }
+    },
+    "feature": {
+        "amx": 0,
         "pkru": 0,
-        "amx": 0
+        "io_uring": 0,
+        "enable_edmm": false,
+        "enable_posix_shm": false
     },
     "mount": [
         {

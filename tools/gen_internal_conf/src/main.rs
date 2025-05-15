@@ -49,13 +49,6 @@ impl DefaultConfig {
 fn main() {
     env_logger::init();
 
-    let instance_is_for_edmm_platform = {
-        match std::env::var("INSTANCE_IS_FOR_EDMM_PLATFORM") {
-            Ok(val) => val == "YES",
-            _ => unreachable!(),
-        }
-    };
-
     let matches = App::new("gen_internal_conf")
         .version("0.2.0")
         // Input: JSON file which users may change
@@ -131,6 +124,14 @@ fn main() {
         .expect("It is not a valid Occlum configuration file.");
     debug!("The occlum config is:{:?}", occlum_config);
 
+    // If env is set, or Occlum.json `enable_edmm` field is set to true, EDMM is enabled.
+    let instance_is_for_edmm_platform = {
+        match std::env::var("INSTANCE_IS_FOR_EDMM_PLATFORM") {
+            Ok(val) => val == "YES" || occlum_config.feature.enable_edmm,
+            _ => unreachable!(),
+        }
+    };
+
     // Match subcommand
     if let Some(sub_matches) = matches.subcommand_matches("gen_conf") {
         let occlum_conf_user_fs_mac = sub_matches.value_of("user_fs_mac").unwrap();
@@ -141,7 +142,7 @@ fn main() {
 
         let occlum_json_file_path = sub_matches.value_of("output_json").unwrap();
         debug!(
-            "Genereated Occlum user config (json) file name {:?}",
+            "Generated Occlum user config (json) file name {:?}",
             occlum_json_file_path
         );
 
@@ -151,7 +152,7 @@ fn main() {
             enclave_config_file_path
         );
 
-        debug!(
+        println!(
             "Build on platform {} EDMM support",
             if instance_is_for_edmm_platform {
                 "WITH"
@@ -159,6 +160,12 @@ fn main() {
                 "WITHOUT"
             }
         );
+
+        debug!(
+            "Enable IO_Uring feature with {:?} instances",
+            occlum_config.feature.io_uring
+        );
+
         debug!(
             "user config init num of threads = {:?}",
             occlum_config.resource_limits.init_num_of_threads
@@ -173,7 +180,10 @@ fn main() {
                     *init_num_of_threads
                 } else {
                     // The user doesn't provide a value
-                    std::cmp::min(DEFAULT_CONFIG.tcs_init_num,occlum_config.resource_limits.max_num_of_threads )
+                    std::cmp::min(
+                        DEFAULT_CONFIG.tcs_init_num,
+                        occlum_config.resource_limits.max_num_of_threads,
+                    )
                 };
 
                 // For platforms with EDMM support, use the max value
@@ -197,7 +207,8 @@ fn main() {
         if tcs_init_num > tcs_max_num {
             println!(
                 "init_num_of_threads: {:?}, max_num_of_threads: {:?}, wrong configuration",
-                occlum_config.resource_limits.init_num_of_threads, occlum_config.resource_limits.max_num_of_threads,
+                occlum_config.resource_limits.init_num_of_threads,
+                occlum_config.resource_limits.max_num_of_threads,
             );
             return;
         }
@@ -310,7 +321,7 @@ fn main() {
                     let config_user_space_max_size = parse_memory_size(&user_space_max_size);
                     if config_user_space_max_size.is_err() {
                         println!(
-                            "The kernel_space_heap_max_size \"{}\" is not correct.",
+                            "The user_space_max_size \"{}\" is not correct.",
                             user_space_max_size
                         );
                         return;
@@ -353,7 +364,8 @@ fn main() {
         if config_user_space_init_size > config_user_space_max_size {
             println!(
                 "user_space_size: {:?}, user_space_max_size: {:?}, wrong configuration",
-                occlum_config.resource_limits.user_space_size, occlum_config.resource_limits.user_space_max_size,
+                occlum_config.resource_limits.user_space_size,
+                occlum_config.resource_limits.user_space_max_size,
             );
             return;
         }
@@ -373,12 +385,13 @@ fn main() {
                     println!("The extra_user_region_for_sdk in default config is not correct.");
                     return;
                 }
-                let user_region_mem_size = if config_user_space_max_size == config_user_space_init_size {
-                    // SDK still need user region to track the EMA.
-                    config_user_space_max_size
-                } else {
-                    config_user_space_max_size + extra_user_region.unwrap()
-                };
+                let user_region_mem_size =
+                    if config_user_space_max_size == config_user_space_init_size {
+                        // SDK still need user region to track the EMA.
+                        config_user_space_max_size
+                    } else {
+                        config_user_space_max_size + extra_user_region.unwrap()
+                    };
 
                 (
                     config_user_space_init_size as u64,
@@ -417,6 +430,56 @@ fn main() {
             0x10_0000
         };
 
+        // Check validity of cache and disk size in mount options
+        const CACHE_PAGE_SIZE: usize = 0x1000;
+        const MIN_CACHE_SIZE: usize = 48 * CACHE_PAGE_SIZE; // 192KB
+        const MIN_DISK_SIZE: usize = 5 * 1024usize.pow(3); // 5GB
+        for mount in &occlum_config.mount {
+            if let Some(cache_size_str) = mount.options.cache_size.as_ref() {
+                let cache_size = {
+                    let cache_size = parse_memory_size(cache_size_str);
+                    if cache_size.is_err() {
+                        println!("The cache_size \"{}\" is not correct.", cache_size_str);
+                        return;
+                    }
+                    cache_size.unwrap()
+                };
+                if cache_size < MIN_CACHE_SIZE
+                    || cache_size % CACHE_PAGE_SIZE != 0
+                    || cache_size > kernel_heap_max_size
+                {
+                    println!(
+                        "Invalid cache_size \"{}\". The cache_size must be 1. larger than the minimum size \"{}\", \
+                        2. aligned with cache page size \"{}\", \
+                        3. smaller than the kernel_heap_max_size \"{}\".",
+                        cache_size, MIN_CACHE_SIZE, CACHE_PAGE_SIZE, kernel_heap_max_size
+                    );
+                    return;
+                }
+            }
+            if mount.type_ == String::from("ext2") && mount.options.disk_size.is_none() {
+                println!("The disk_size must be specified for Ext2.");
+                return;
+            }
+            if let Some(disk_size_str) = mount.options.disk_size.as_ref() {
+                let disk_size = {
+                    let disk_size = parse_memory_size(disk_size_str);
+                    if disk_size.is_err() {
+                        println!("The disk_size \"{}\" is not correct.", disk_size_str);
+                        return;
+                    }
+                    disk_size.unwrap()
+                };
+                if disk_size < MIN_DISK_SIZE {
+                    println!(
+                        "The disk_size \"{}\" is too small, minimum size is \"{}\".",
+                        disk_size, MIN_DISK_SIZE
+                    );
+                    return;
+                }
+            }
+        }
+
         let kss_tuple = parse_kss_conf(&occlum_config);
 
         let (misc_select, misc_mask) = if instance_is_for_edmm_platform {
@@ -441,7 +504,7 @@ fn main() {
             TCSNum: tcs_init_num,
             TCSMinPool: tcs_min_pool,
             TCSMaxNum: tcs_max_num,
-            TCSPolicy: 1,
+            TCSPolicy: 0,
             DisableDebug: match occlum_config.metadata.debuggable {
                 true => 0,
                 false => 1,
@@ -460,8 +523,8 @@ fn main() {
             ISVEXTPRODID_L: kss_tuple.2,
             ISVFAMILYID_H: kss_tuple.3,
             ISVFAMILYID_L: kss_tuple.4,
-            PKRU: occlum_config.metadata.pkru,
-            AMX: occlum_config.metadata.amx,
+            PKRU: occlum_config.feature.pkru,
+            AMX: occlum_config.feature.amx,
         };
         let enclave_config = serde_xml_rs::to_string(&sgx_enclave_configuration).unwrap();
         debug!("The enclave config:{:?}", enclave_config);
@@ -481,6 +544,20 @@ fn main() {
             app_config.unwrap()
         };
 
+        // If the user doesn't provide a value, set it false unless it is release enclave.
+        // If the user provides a value, just use it.
+        let disable_log = {
+            if occlum_config.metadata.disable_log.is_none() {
+                if occlum_config.metadata.debuggable {
+                    false
+                } else {
+                    true
+                }
+            } else {
+                occlum_config.metadata.disable_log.unwrap()
+            }
+        };
+
         let occlum_json_config = InternalOcclumJson {
             resource_limits: InternalResourceLimits {
                 user_space_init_size: config_user_space_init_size.to_string() + "B",
@@ -492,7 +569,9 @@ fn main() {
                 default_mmap_size: occlum_config.process.default_mmap_size,
             },
             env: occlum_config.env,
+            disable_log: disable_log,
             app: app_config,
+            feature: occlum_config.feature.clone(),
         };
 
         let occlum_json_str = serde_json::to_string_pretty(&occlum_json_config).unwrap();
@@ -648,7 +727,7 @@ fn gen_app_config(
     if root_mc.options.layers.is_none() {
         return Err("the root UnionFS must be given layers");
     }
-    let mut root_image_sefs_mc = root_mc
+    let root_image_sefs_mc = root_mc
         .options
         .layers
         .as_mut()
@@ -683,6 +762,7 @@ struct OcclumConfiguration {
     entry_points: serde_json::Value,
     env: serde_json::Value,
     metadata: OcclumMetadata,
+    feature: OcclumFeature,
     mount: Vec<OcclumMount>,
 }
 
@@ -720,13 +800,25 @@ struct OcclumMetadata {
     product_id: u32,
     version_number: u32,
     debuggable: bool,
+    #[serde(default)]
+    disable_log: Option<bool>,
     enable_kss: bool,
     family_id: OcclumMetaID,
     ext_prod_id: OcclumMetaID,
+}
+
+#[derive(Debug, PartialEq, Clone, Deserialize, Serialize)]
+struct OcclumFeature {
+    #[serde(default)]
+    amx: u32,
     #[serde(default)]
     pkru: u32,
     #[serde(default)]
-    amx: u32,
+    io_uring: u32,
+    #[serde(default)]
+    enable_edmm: bool,
+    #[serde(default)]
+    enable_posix_shm: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -751,6 +843,8 @@ struct OcclumMountOptions {
     pub temporary: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_size: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_size: Option<String>,
 }
 
 #[inline]
@@ -809,5 +903,7 @@ struct InternalOcclumJson {
     resource_limits: InternalResourceLimits,
     process: OcclumProcess,
     env: serde_json::Value,
+    disable_log: bool,
     app: serde_json::Value,
+    feature: OcclumFeature,
 }

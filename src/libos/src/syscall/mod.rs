@@ -43,8 +43,8 @@ use crate::misc::{resource_t, rlimit_t, sysinfo_t, utsname_t, RandFlags};
 use crate::net::{
     do_accept, do_accept4, do_bind, do_connect, do_epoll_create, do_epoll_create1, do_epoll_ctl,
     do_epoll_pwait, do_epoll_wait, do_getpeername, do_getsockname, do_getsockopt, do_listen,
-    do_poll, do_ppoll, do_recvfrom, do_recvmsg, do_select, do_sendmmsg, do_sendmsg, do_sendto,
-    do_setsockopt, do_shutdown, do_socket, do_socketpair, mmsghdr, msghdr, msghdr_mut,
+    do_poll, do_ppoll, do_pselect6, do_recvfrom, do_recvmsg, do_select, do_sendmmsg, do_sendmsg,
+    do_sendto, do_setsockopt, do_shutdown, do_socket, do_socketpair, mmsghdr, sigset_argpack,
 };
 use crate::process::{
     do_arch_prctl, do_clone, do_execve, do_exit, do_exit_group, do_futex, do_get_robust_list,
@@ -59,8 +59,8 @@ use crate::sched::{
 };
 use crate::signal::{
     do_kill, do_rt_sigaction, do_rt_sigpending, do_rt_sigprocmask, do_rt_sigreturn,
-    do_rt_sigtimedwait, do_sigaltstack, do_tgkill, do_tkill, sigaction_t, siginfo_t, sigset_t,
-    stack_t,
+    do_rt_sigsuspend, do_rt_sigtimedwait, do_sigaltstack, do_tgkill, do_tkill, sigaction_t,
+    siginfo_t, sigset_t, stack_t,
 };
 use crate::vm::{MMapFlags, MRemapFlags, MSyncFlags, MadviceFlags, VMPerms};
 use crate::{fs, process, std, vm};
@@ -109,7 +109,7 @@ macro_rules! process_syscall_table_with_callback {
             (Mprotect = 10) => do_mprotect(addr: usize, len: usize, prot: u32),
             (Munmap = 11) => do_munmap(addr: usize, size: usize),
             (Brk = 12) => do_brk(new_brk_addr: usize),
-            (RtSigaction = 13) => do_rt_sigaction(signum_c: c_int, new_sa_c: *const sigaction_t, old_sa_c: *mut sigaction_t),
+            (RtSigaction = 13) => do_rt_sigaction(signum_c: c_int, new_sa_c: *const sigaction_t, old_sa_c: *mut sigaction_t, sigset_size: size_t),
             (RtSigprocmask = 14) => do_rt_sigprocmask(how: c_int, set: *const sigset_t, oldset: *mut sigset_t, sigset_size: size_t),
             (RtSigreturn = 15) => do_rt_sigreturn(context: *mut CpuContext),
             (Ioctl = 16) => do_ioctl(fd: FileDesc, cmd: u32, argp: *mut u8),
@@ -142,8 +142,8 @@ macro_rules! process_syscall_table_with_callback {
             (Accept = 43) => do_accept(fd: c_int, addr: *mut libc::sockaddr, addr_len: *mut libc::socklen_t),
             (Sendto = 44) => do_sendto(fd: c_int, base: *const c_void, len: size_t, flags: c_int, addr: *const libc::sockaddr, addr_len: libc::socklen_t),
             (Recvfrom = 45) => do_recvfrom(fd: c_int, base: *mut c_void, len: size_t, flags: c_int, addr: *mut libc::sockaddr, addr_len: *mut libc::socklen_t),
-            (Sendmsg = 46) => do_sendmsg(fd: c_int, msg_ptr: *const msghdr, flags_c: c_int),
-            (Recvmsg = 47) => do_recvmsg(fd: c_int, msg_mut_ptr: *mut msghdr_mut, flags_c: c_int),
+            (Sendmsg = 46) => do_sendmsg(fd: c_int, msg_ptr: *const libc::msghdr, flags_c: c_int),
+            (Recvmsg = 47) => do_recvmsg(fd: c_int, msg_mut_ptr: *mut libc::msghdr, flags_c: c_int),
             (Shutdown = 48) => do_shutdown(fd: c_int, how: c_int),
             (Bind = 49) => do_bind(fd: c_int, addr: *const libc::sockaddr, addr_len: libc::socklen_t),
             (Listen = 50) => do_listen(fd: c_int, backlog: c_int),
@@ -188,9 +188,9 @@ macro_rules! process_syscall_table_with_callback {
             (Readlink = 89) => do_readlink(path: *const i8, buf: *mut u8, size: usize),
             (Chmod = 90) => do_chmod(path: *const i8, mode: u16),
             (Fchmod = 91) => do_fchmod(fd: FileDesc, mode: u16),
-            (Chown = 92) => do_chown(path: *const i8, uid: u32, gid: u32),
-            (Fchown = 93) => do_fchown(fd: FileDesc, uid: u32, gid: u32),
-            (Lchown = 94) => do_lchown(path: *const i8, uid: u32, gid: u32),
+            (Chown = 92) => do_chown(path: *const i8, uid: i32, gid: i32),
+            (Fchown = 93) => do_fchown(fd: FileDesc, uid: i32, gid: i32),
+            (Lchown = 94) => do_lchown(path: *const i8, uid: i32, gid: i32),
             (Umask = 95) => do_umask(mask: u16),
             (Gettimeofday = 96) => do_gettimeofday(tv_u: *mut timeval_t),
             (Getrlimit = 97) => do_gettrlimit(resource: u32, rlim: *mut rlimit_t),
@@ -226,7 +226,7 @@ macro_rules! process_syscall_table_with_callback {
             (RtSigpending = 127) => do_rt_sigpending(buf_ptr: *mut sigset_t, buf_size: usize),
             (RtSigtimedwait = 128) => do_rt_sigtimedwait(mask_ptr: *const sigset_t, info_ptr: *mut siginfo_t, timeout_ptr: *const timespec_t, mask_size: usize),
             (RtSigqueueinfo = 129) => handle_unsupported(),
-            (RtSigsuspend = 130) => handle_unsupported(),
+            (RtSigsuspend = 130) => do_rt_sigsuspend(mask_ptr: *const sigset_t),
             (Sigaltstack = 131) => do_sigaltstack(ss: *const stack_t, old_ss: *mut stack_t, context: *const CpuContext),
             (Utime = 132) => do_utime(path: *const i8, times: *const utimbuf_t),
             (Mknod = 133) => handle_unsupported(),
@@ -356,7 +356,7 @@ macro_rules! process_syscall_table_with_callback {
             (Openat = 257) => do_openat(dirfd: i32, path: *const i8, flags: u32, mode: u16),
             (Mkdirat = 258) => do_mkdirat(dirfd: i32, path: *const i8, mode: u16),
             (Mknodat = 259) => handle_unsupported(),
-            (Fchownat = 260) => do_fchownat(dirfd: i32, path: *const i8, uid: u32, gid: u32, flags: i32),
+            (Fchownat = 260) => do_fchownat(dirfd: i32, path: *const i8, uid: i32, gid: i32, flags: i32),
             (Futimesat = 261) => do_futimesat(dirfd: i32, path: *const i8, times: *const timeval_t),
             (Fstatat = 262) => do_fstatat(dirfd: i32, path: *const i8, stat_buf: *mut Stat, flags: u32),
             (Unlinkat = 263) => do_unlinkat(dirfd: i32, path: *const i8, flags: i32),
@@ -365,8 +365,8 @@ macro_rules! process_syscall_table_with_callback {
             (Symlinkat = 266) => do_symlinkat(target: *const i8, new_dirfd: i32, link_path: *const i8),
             (Readlinkat = 267) => do_readlinkat(dirfd: i32, path: *const i8, buf: *mut u8, size: usize),
             (Fchmodat = 268) => do_fchmodat(dirfd: i32, path: *const i8, mode: u16),
-            (Faccessat = 269) => do_faccessat(dirfd: i32, path: *const i8, mode: u32, flags: u32),
-            (Pselect6 = 270) => handle_unsupported(),
+            (Faccessat = 269) => do_faccessat(dirfd: i32, path: *const i8, mode: u32),
+            (Pselect6 = 270) => do_pselect6(nfds: c_int, readfds: *mut libc::fd_set, writefds: *mut libc::fd_set, exceptfds: *mut libc::fd_set, timeout: *mut timespec_t, data: *const sigset_argpack),
             (Ppoll = 271) => do_ppoll(fds: *mut libc::pollfd, nfds: libc::nfds_t, timeout_ts: *const timespec_t, sigmask: *const sigset_t),
             (Unshare = 272) => handle_unsupported(),
             (SetRobustList = 273) => do_set_robust_list(list_head_ptr: *mut RobustListHead, len: usize),
@@ -422,6 +422,15 @@ macro_rules! process_syscall_table_with_callback {
             (Userfaultfd = 323) => handle_unsupported(),
             (Membarrier = 324) => handle_unsupported(),
             (Mlock2 = 325) => handle_unsupported(),
+            (CopyFileRange = 326) => handle_unsupported(),
+            (Preadv2 = 327) => handle_unsupported(),
+            (Pwritev2 = 328) => handle_unsupported(),
+            (PkeyMprotect = 329) => handle_unsupported(),
+            (PkeyAlloc = 330) => handle_unsupported(),
+            (PkeyFree = 331) => handle_unsupported(),
+            (Statx = 332) => handle_unsupported(),
+            (IoPgetevents = 333) => handle_unsupported(),
+            (Rseq = 334) => handle_unsupported(),
 
             // Occlum-specific system calls
             (SpawnGlibc = 359) => do_spawn_for_glibc(child_pid_ptr: *mut u32, path: *const i8, argv: *const *const i8, envp: *const *const i8, fa: *const SpawnFileActions, attribute_list: *const posix_spawnattr_t),
@@ -689,26 +698,44 @@ fn do_syscall(user_context: &mut CpuContext) {
     let retval = match ret {
         Ok(retval) => retval as isize,
         Err(e) => {
-            let should_log_err = |errno| {
+            let should_log_err = |num, errno| {
+                let syscall_num = match SyscallNum::try_from(num) {
+                    Ok(num) => num,
+                    Err(e) => return true,
+                };
                 // If the log level requires every detail, don't ignore any error
                 if log::max_level() == LevelFilter::Trace {
                     return true;
                 }
-
                 // All other log levels require errors to be outputed. But
                 // some errnos are usually benign and may occur in a very high
-                // frequency. So we want to ignore them to keep noises at a
-                // minimum level in the log.
+                // frequency. So we want to lower them to warn level to keep noises
+                // at a minimum level in the error log.
                 //
                 // TODO: use a smarter, frequency-based strategy to decide whether
                 // to suppress error messages.
                 match errno {
-                    EAGAIN | ETIMEDOUT => false,
+                    EAGAIN | ETIMEDOUT | ENOENT | ENOTTY => false,
+                    EINTR => match syscall_num {
+                        SyscallNum::Nanosleep => false,
+                        SyscallNum::Futex => false,
+                        SyscallNum::RtSigsuspend => false,
+                        _ => true,
+                    },
+                    ENOSYS => match syscall_num {
+                        SyscallNum::Getrusage => false,
+                        SyscallNum::Madvise => false,
+                        SyscallNum::Ioctl => false,
+                        _ => true,
+                    },
                     _ => true,
                 }
             };
-            if should_log_err(e.errno()) {
+
+            if should_log_err(num, e.errno()) {
                 error!("Error = {}", e.backtrace());
+            } else {
+                warn!("Error = {}", e.backtrace());
             }
 
             let retval = -(e.errno() as isize);
@@ -904,7 +931,7 @@ fn do_gettimeofday(tv_u: *mut timeval_t) -> Result<isize> {
 
 fn do_clock_gettime(clockid: clockid_t, ts_u: *mut timespec_t) -> Result<isize> {
     check_mut_ptr(ts_u)?;
-    let clockid = time::ClockID::from_raw(clockid)?;
+    let clockid = time::ClockId::try_from(clockid)?;
     let ts = time::do_clock_gettime(clockid)?;
     unsafe {
         *ts_u = ts;
@@ -913,7 +940,7 @@ fn do_clock_gettime(clockid: clockid_t, ts_u: *mut timespec_t) -> Result<isize> 
 }
 
 fn do_time(tloc_u: *mut time_t) -> Result<isize> {
-    let ts = time::do_clock_gettime(time::ClockID::CLOCK_REALTIME)?;
+    let ts = time::do_clock_gettime(time::ClockId::CLOCK_REALTIME)?;
     if !tloc_u.is_null() {
         check_mut_ptr(tloc_u)?;
         unsafe {
@@ -924,11 +951,12 @@ fn do_time(tloc_u: *mut time_t) -> Result<isize> {
 }
 
 fn do_clock_getres(clockid: clockid_t, res_u: *mut timespec_t) -> Result<isize> {
+    let clockid = time::ClockId::try_from(clockid)?;
     if res_u.is_null() {
         return Ok(0);
     }
     check_mut_ptr(res_u)?;
-    let clockid = time::ClockID::from_raw(clockid)?;
+
     let res = time::do_clock_getres(clockid)?;
     unsafe {
         *res_u = res;
@@ -952,7 +980,7 @@ fn do_clock_nanosleep(
     } else {
         None
     };
-    let clockid = time::ClockID::from_raw(clockid)?;
+    let clockid = time::ClockId::try_from(clockid)?;
     time::do_clock_nanosleep(clockid, flags, &req, rem)?;
     Ok(0)
 }

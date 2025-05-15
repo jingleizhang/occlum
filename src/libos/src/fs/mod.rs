@@ -2,8 +2,7 @@ use super::*;
 
 use process;
 use rcore_fs::vfs::{
-    DirentWriter, DirentWriterContext, FileSystem, FileType, FsError, INode, Metadata, Timespec,
-    PATH_MAX,
+    DirentVisitor, FileSystem, FileType, FsError, INode, Metadata, Timespec, PATH_MAX,
 };
 use std;
 use std::any::Any;
@@ -20,8 +19,9 @@ pub use self::events::{AtomicIoEvents, IoEvents, IoNotifier};
 pub use self::file::{File, FileRef};
 pub use self::file_ops::{
     occlum_ocall_ioctl, utimbuf_t, AccessMode, BuiltinIoctlNum, CreationFlags, FallocateFlags,
-    FileMode, IfConf, IoctlCmd, Stat, StatusFlags, StructuredIoctlArgType, StructuredIoctlNum,
-    STATUS_FLAGS_MASK,
+    FileMode, GetIfConf, GetIfReqWithRawCmd, GetReadBufLen, GetWinSize, IfConf, IoctlCmd,
+    IoctlRawCmd, NonBuiltinIoctlCmd, SetNonBlocking, SetWinSize, Stat, StatusFlags,
+    StructuredIoctlArgType, StructuredIoctlNum, TcGets, TcSets, STATUS_FLAGS_MASK,
 };
 pub use self::file_table::{FileDesc, FileTable, FileTableEvent, FileTableNotifier};
 pub use self::fs_ops::Statfs;
@@ -33,7 +33,7 @@ pub use self::locks::range_lock::{
     FileRange, RangeLock, RangeLockBuilder, RangeLockList, RangeLockType, OFFSET_MAX,
 };
 pub use self::pipe::PipeType;
-pub use self::rootfs::ROOT_FS;
+pub use self::rootfs::{ROOT_FS, SEFS_MANAGER};
 pub use self::stdio::{HostStdioFds, StdinFile, StdoutFile};
 pub use self::syscalls::*;
 pub use self::timer_file::{AsTimer, TimerCreationFlags, TimerFile};

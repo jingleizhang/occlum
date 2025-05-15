@@ -7,9 +7,11 @@ use super::*;
 use crate::signal::{FaultSignal, SigSet};
 use crate::syscall::exception_interrupt_syscall_c_abi;
 use crate::syscall::{CpuContext, ExtraContext, SyscallNum};
-use crate::vm::{enclave_page_fault_handler, USER_SPACE_VM_MANAGER};
+use crate::vm::{enclave_page_fault_handler, is_page_committed, VMRange, USER_SPACE_VM_MANAGER};
 use sgx_types::*;
 use sgx_types::{sgx_exception_type_t, sgx_exception_vector_t};
+
+pub use self::cpuid::{get_cpuid_info, is_cpu_support_sgx2};
 
 const ENCLU: u32 = 0xd7010f;
 const EACCEPT: u32 = 0x5;
@@ -21,12 +23,22 @@ mod rdtsc;
 mod syscall;
 
 pub fn register_exception_handlers() {
-    setup_cpuid_info();
-    // Register handlers whose priorities go from low to high
-    unsafe {
-        let is_first = 1;
-        sgx_register_exception_handler(is_first, handle_exception);
+    extern "C" {
+        fn sgx_register_exception_handler_for_occlum_user_space(
+            user_space_ranges: *const [VMRange; 2],
+            handler: sgx_exception_handler_t,
+        ) -> sgx_status_t;
     }
+    setup_cpuid_info();
+
+    let user_space_ranges: [VMRange; 2] = USER_SPACE_VM_MANAGER.get_user_space_ranges();
+    let ret = unsafe {
+        sgx_register_exception_handler_for_occlum_user_space(
+            &user_space_ranges as *const _,
+            handle_exception,
+        )
+    };
+    assert!(ret == sgx_status_t::SGX_SUCCESS);
 }
 
 fn try_handle_kernel_exception(info: &sgx_exception_info_t) -> i32 {
@@ -48,6 +60,12 @@ fn try_handle_kernel_exception(info: &sgx_exception_info_t) -> i32 {
             if ENCLU == (unsafe { *rip } as u32) & 0xffffff
                 && (EACCEPT == rax || EACCEPTCOPY == rax)
             {
+                return SGX_MM_EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // Check spurious #PF
+            // FIXME: We can re-consider this check when we know the root cause
+            if is_page_committed(pf_addr) {
                 return SGX_MM_EXCEPTION_CONTINUE_EXECUTION;
             }
 
@@ -131,7 +149,7 @@ pub fn do_handle_exception(
             return Ok(0);
         }
 
-        warn!(
+        error!(
             "#PF not handled. Turn to signal. user context = {:?}",
             user_context
         );

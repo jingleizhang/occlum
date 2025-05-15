@@ -26,6 +26,11 @@
 #![feature(strict_provenance)]
 // for VMArea::can_merge_vmas
 #![feature(is_some_and)]
+// for edmm_api macro
+#![feature(linkage)]
+#![feature(new_uninit)]
+#![feature(raw_ref_op)]
+#![feature(let_chains)]
 
 #[macro_use]
 extern crate alloc;
@@ -79,15 +84,19 @@ mod prelude;
 #[macro_use]
 mod error;
 
+#[macro_use]
+mod net;
+
+mod blk;
 mod config;
 mod entry;
 mod events;
 mod exception;
 mod fs;
 mod interrupt;
+mod io_uring;
 mod ipc;
 mod misc;
-mod net;
 mod process;
 mod sched;
 mod signal;

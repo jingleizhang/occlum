@@ -9,6 +9,7 @@ use super::{
 };
 use crate::events::HostEventFd;
 use crate::fs::{EventCreationFlags, EventFile};
+use crate::net::AsEpollFile;
 use crate::net::THREAD_NOTIFIERS;
 use crate::prelude::*;
 use crate::signal::{SigQueues, SigSet, SigStack};
@@ -42,6 +43,9 @@ pub struct Thread {
     fs: FsViewRef,
     files: FileTableRef,
     sched: SchedAgentRef,
+    // According to POSIX, the nice value is a per-process setting.
+    // In our implementation, the threads belong to same process
+    // share the same nice value.
     nice: NiceValueRef,
     rlimits: ResourceLimitsRef,
     // Signal
@@ -63,6 +67,7 @@ pub enum ThreadStatus {
     Init,
     Running,
     Exited,
+    ToStop,
     Stopped,
 }
 
@@ -130,21 +135,24 @@ impl Thread {
 
     /// Get a file from the file table.
     pub fn file(&self, fd: FileDesc) -> Result<FileRef> {
-        self.files().lock().unwrap().get(fd)
+        self.files().lock().get(fd)
     }
 
     /// Add a file to the file table.
     pub fn add_file(&self, new_file: FileRef, close_on_spawn: bool) -> FileDesc {
-        self.files().lock().unwrap().put(new_file, close_on_spawn)
+        self.files().lock().put(new_file, close_on_spawn)
     }
 
     /// Close a file from the file table. It will release the POSIX advisory locks owned
     /// by current process.
     pub fn close_file(&self, fd: FileDesc) -> Result<()> {
-        // Deadlock note: EpollFile's drop method needs to access file table. So
-        // if the drop method is invoked inside the del method, then there will be
-        // a deadlock.
-        let file = self.files().lock().unwrap().del(fd)?;
+        // Unregister epoll file to avoid deadlock in file table
+        let file = self.files().lock().del(fd)?;
+
+        if let Ok(epoll_file) = file.as_epoll_file() {
+            epoll_file.unregister_from_file_table();
+        }
+
         file.release_advisory_locks();
         Ok(())
     }
@@ -152,9 +160,13 @@ impl Thread {
     /// Close all files in the file table. It will release the POSIX advisory locks owned
     /// by current process.
     pub fn close_all_files(&self) {
-        // Deadlock note: Same with the issue in close_file method
-        let files = self.files().lock().unwrap().del_all();
+        let files = self.files().lock().del_all();
         for file in files {
+            if let Ok(epoll_file) = file.as_epoll_file() {
+                // Unregister epoll file to avoid deadlock in file table
+                epoll_file.unregister_from_file_table();
+            }
+
             file.release_advisory_locks();
         }
     }
@@ -234,7 +246,7 @@ impl Thread {
         *raw_ptr = (unsafe { sgx_thread_get_self() } as usize);
 
         // Before the thread starts, this thread could be stopped by other threads
-        if self.is_forced_to_stop() {
+        if self.is_forced_to_stop() || self.is_stopped() {
             info!("thread is forced to stopped before this thread starts");
         } else {
             self.inner().start();
@@ -301,10 +313,17 @@ impl Thread {
 
     pub fn force_stop(&self) {
         let mut inner = self.inner();
-        inner.stop();
+        // If the thread is not exited or stopped, then notify it to stop
+        if inner.status() != ThreadStatus::Exited && inner.status() != ThreadStatus::Stopped {
+            inner.notify_stop();
+        }
     }
 
     pub fn is_forced_to_stop(&self) -> bool {
+        self.inner().status() == ThreadStatus::ToStop
+    }
+
+    pub fn is_stopped(&self) -> bool {
         self.inner().status() == ThreadStatus::Stopped
     }
 
@@ -348,6 +367,7 @@ pub enum ThreadInner {
     Init,
     Running,
     Exited { term_status: TermStatus },
+    ToStop, // notified to stop, not stopped yet
     Stopped,
 }
 
@@ -361,6 +381,7 @@ impl ThreadInner {
             Self::Init { .. } => ThreadStatus::Init,
             Self::Running { .. } => ThreadStatus::Running,
             Self::Exited { .. } => ThreadStatus::Exited,
+            Self::ToStop { .. } => ThreadStatus::ToStop,
             Self::Stopped { .. } => ThreadStatus::Stopped,
         }
     }
@@ -376,6 +397,10 @@ impl ThreadInner {
         *self = Self::Running;
     }
 
+    pub fn notify_stop(&mut self) {
+        *self = Self::ToStop;
+    }
+
     pub fn stop(&mut self) {
         *self = Self::Stopped;
     }
@@ -385,7 +410,6 @@ impl ThreadInner {
     }
 
     pub fn exit(&mut self, term_status: TermStatus) {
-        debug_assert!(self.status() == ThreadStatus::Running);
         *self = Self::Exited { term_status };
     }
 }
